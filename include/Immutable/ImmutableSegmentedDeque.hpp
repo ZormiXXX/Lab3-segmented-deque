@@ -3,14 +3,10 @@
 #include "../SegmentedDeque.hpp"
 
 template<class T>
-class ImmutableSegmentedDeque : public SegmentedDequeBase<T> {
+class ImmutableSegmentedDeque : public SegmentedDeque<T> {
 protected:
-    ImmutableSegmentedDeque<T>* Clone() const override {
-        return new ImmutableSegmentedDeque<T>(*this);
-    }
-
     ImmutableSegmentedDeque<T>* Instance() override {
-        return Clone();
+        return new ImmutableSegmentedDeque<T>(*this);
     }
 
     ImmutableSegmentedDeque<T>* CreateEmptySameKind() const override {
@@ -22,7 +18,7 @@ public:
         int blockCapacityValue = 8,
         DequeStorageKind kind = DequeStorageKind::ArraySequence
     )
-        : SegmentedDequeBase<T>(blockCapacityValue, kind) {}
+        : SegmentedDeque<T>(blockCapacityValue, kind) {}
 
     ImmutableSegmentedDeque(
         const T* items,
@@ -30,8 +26,8 @@ public:
         int blockCapacityValue = 8,
         DequeStorageKind kind = DequeStorageKind::ArraySequence
     )
-        : SegmentedDequeBase<T>(items, count, blockCapacityValue, kind) {}
+        : SegmentedDeque<T>(items, count, blockCapacityValue, kind) {}
 
     ImmutableSegmentedDeque(const ImmutableSegmentedDeque<T>& other)
-        : SegmentedDequeBase<T>(other) {}
+        : SegmentedDeque<T>(other) {}
 };

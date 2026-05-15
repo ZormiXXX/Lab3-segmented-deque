@@ -1,9 +1,8 @@
-#include <algorithm>
 #include <iomanip>
 #include <iostream>
 #include <sstream>
 #include <string>
-#include <vector>
+#include "../include/DynamicArray.hpp"
 #include "../include/Immutable/ImmutableSegmentedDeque.hpp"
 #include "../include/InversionAlgorithms.hpp"
 #include "../include/Mutable/MutableSegmentedDeque.hpp"
@@ -23,7 +22,7 @@ struct TestResult {
     int passedAssertions;
 };
 
-static std::vector<TestResult> allResults;
+static DynamicArray<TestResult> allResults;
 static int totalAssertions = 0;
 static int totalPassed = 0;
 static bool currentTestPassed = false;
@@ -93,7 +92,7 @@ static int currentTestAssertions = 0;
         std::cout << COLOR_RED "  FAIL" COLOR_RESET << " Непредвиденное исключение: " << e.what() << std::endl; \
         currentTestPassed = false; \
     } \
-    allResults.push_back({#name, currentTestPassed, currentTestAssertions, currentTestPassed ? currentTestAssertions : 0}); \
+    allResults.Append({#name, currentTestPassed, currentTestAssertions, currentTestPassed ? currentTestAssertions : 0}); \
     std::cout << COLOR_BOLD "\n Результат: " COLOR_RESET; \
     if (currentTestPassed) { \
         std::cout << COLOR_GREEN "ПРОЙДЕН" COLOR_RESET << std::endl; \
@@ -123,7 +122,7 @@ void PrintSubHeader(const std::string& text) {
     std::cout << COLOR_CYAN "\n  -- " COLOR_RESET << text << COLOR_CYAN " --" COLOR_RESET << std::endl;
 }
 
-}  // namespace
+}  
 
 TEST(TestMutableDequePushAndAccess) {
     PrintSubHeader("PushBack и доступ по индексу");
@@ -273,7 +272,7 @@ TEST(TestExceptions) {
 }
 
 int RunAllTests() {
-    allResults.clear();
+    allResults.Resize(0);
     totalAssertions = 0;
     totalPassed = 0;
 
@@ -290,13 +289,19 @@ int RunAllTests() {
     RUN_TEST(TestInversionAlgorithmsAgree);
     RUN_TEST(TestExceptions);
 
+    int passedTests = 0;
+    for (int i = 0; i < allResults.GetSize(); i++) {
+        if (allResults[i].passed) {
+            passedTests++;
+        }
+    }
+    int failedTests = allResults.GetSize() - passedTests;
+
     std::cout << COLOR_BOLD COLOR_YELLOW "\n┌──────────────────────────── ИТОГИ ────────────────────────────┐" COLOR_RESET << std::endl;
     std::cout << COLOR_BOLD COLOR_YELLOW "│" COLOR_RESET
-              << " Всего тестов: " << std::setw(2) << allResults.size()
-              << "   Успешно: " << std::setw(2)
-              << std::count_if(allResults.begin(), allResults.end(), [](const TestResult& item) { return item.passed; })
-              << "   Провалено: " << std::setw(2)
-              << std::count_if(allResults.begin(), allResults.end(), [](const TestResult& item) { return !item.passed; })
+              << " Всего тестов: " << std::setw(2) << allResults.GetSize()
+              << "   Успешно: " << std::setw(2) << passedTests
+              << "   Провалено: " << std::setw(2) << failedTests
               << std::setw(14) << " " << COLOR_BOLD COLOR_YELLOW "│" COLOR_RESET << std::endl;
     std::cout << COLOR_BOLD COLOR_YELLOW "│" COLOR_RESET
               << " Проверок: " << std::setw(3) << totalAssertions

@@ -1,5 +1,3 @@
-#include <iostream>
-
 extern int RunAllTests();
 
 int main() {

@@ -1,143 +1,263 @@
 #include <iostream>
 #include <limits>
+#include <random>
 #include <string>
-#include <vector>
+#include "../include/DynamicArray.hpp"
+#include "../include/Exceptions.hpp"
 #include "../include/Immutable/ImmutableSegmentedDeque.hpp"
-#include "../include/InversionAlgorithms.hpp"
 #include "../include/Mutable/MutableSegmentedDeque.hpp"
 
 extern int RunAllTests();
 
 namespace {
 
-void ShowMenu() {
-    std::cout << "\n╔══════════════════════════════════════════════════════════════╗" << std::endl;
-    std::cout << "║        ЛАБОРАТОРНАЯ РАБОТА №3 - SEGMENTED DEQUE             ║" << std::endl;
-    std::cout << "╠══════════════════════════════════════════════════════════════╣" << std::endl;
-    std::cout << "║  СОЗДАНИЕ И ЗАГРУЗКА                                        ║" << std::endl;
-    std::cout << "║   1. Создать дек вручную                                    ║" << std::endl;
-    std::cout << "║   2. Сгенерировать случайный дек                            ║" << std::endl;
-    std::cout << "╠══════════════════════════════════════════════════════════════╣" << std::endl;
-    std::cout << "║  БАЗОВЫЕ ОПЕРАЦИИ                                            ║" << std::endl;
-    std::cout << "║   3. PushFront                                              ║" << std::endl;
-    std::cout << "║   4. PushBack                                               ║" << std::endl;
-    std::cout << "║   5. PopFront                                               ║" << std::endl;
-    std::cout << "║   6. PopBack                                                ║" << std::endl;
-    std::cout << "║   7. Показать дек                                           ║" << std::endl;
-    std::cout << "║   8. Показать segmented-buffer layout                       ║" << std::endl;
-    std::cout << "╠══════════════════════════════════════════════════════════════╣" << std::endl;
-    std::cout << "║  ОПЕРАЦИИ НАД КОЛЛЕКЦИЕЙ                                     ║" << std::endl;
-    std::cout << "║   9. Concat с другим деком                                  ║" << std::endl;
-    std::cout << "║   10. Извлечь поддек                                         ║" << std::endl;
-    std::cout << "║   11. Найти подпоследовательность                            ║" << std::endl;
-    std::cout << "║   12. Map (x * 2)                                            ║" << std::endl;
-    std::cout << "║   13. Where (только чётные)                                  ║" << std::endl;
-    std::cout << "║   14. Reduce (сумма)                                         ║" << std::endl;
-    std::cout << "║   15. Sort                                                   ║" << std::endl;
-    std::cout << "║   16. MergeSorted с другим отсортированным деком             ║" << std::endl;
-    std::cout << "╠══════════════════════════════════════════════════════════════╣" << std::endl;
-    std::cout << "║  ПРОВЕРКА                                                    ║" << std::endl;
-    std::cout << "║   17. Запустить модульные тесты                              ║" << std::endl;
-    std::cout << "╠══════════════════════════════════════════════════════════════╣" << std::endl;
-    std::cout << "║   0. Выход                                                   ║" << std::endl;
-    std::cout << "╚══════════════════════════════════════════════════════════════╝" << std::endl;
-    std::cout << "> ";
+using IntDeque = SegmentedDeque<int>;
+using MutableIntDeque = MutableSegmentedDeque<int>;
+using ImmutableIntDeque = ImmutableSegmentedDeque<int>;
+using IntValues = DynamicArray<int>;
+
+constexpr const char* kMenu = R"(
+╔══════════════════════════════════════════════════════════════╗
+║        ЛАБОРАТОРНАЯ РАБОТА №3 - SEGMENTED DEQUE             ║
+╠══════════════════════════════════════════════════════════════╣
+║  СОЗДАНИЕ И ЗАГРУЗКА                                        ║
+║   1. Создать дек вручную                                    ║
+║      Ввести тип, размер сегмента и все элементы             ║
+║   2. Сгенерировать случайный дек                            ║
+║      Заполнить дек случайными числами по диапазону          ║
+╠══════════════════════════════════════════════════════════════╣
+║  БАЗОВЫЕ ОПЕРАЦИИ                                           ║
+║   3. PushFront                                              ║
+║      Добавить элемент в начало дека                         ║
+║   4. PushBack                                               ║
+║      Добавить элемент в конец дека                          ║
+║   5. PopFront                                               ║
+║      Удалить первый элемент                                 ║
+║   6. PopBack                                                ║
+║      Удалить последний элемент                              ║
+║   7. Показать дек                                           ║
+║      Вывести элементы, тип и краткую сводку                 ║
+║   8. Показать segmented-buffer layout                       ║
+║      Показать сегменты и степень их заполнения              ║
+╠══════════════════════════════════════════════════════════════╣
+║  ОПЕРАЦИИ НАД КОЛЛЕКЦИЕЙ                                    ║
+║   9. Concat с другим деком                                  ║
+║      Приписать второй дек в конец текущего                  ║
+║   10. Извлечь поддек                                        ║
+║      Оставить элементы из диапазона [start, end]            ║
+║   11. Найти подпоследовательность                           ║
+║      Найти индекс первого вхождения шаблона                 ║
+║   12. Map (x * 2)                                           ║
+║      Умножить каждый элемент на 2                           ║
+║   13. Where (только чётные)                                 ║
+║      Оставить только чётные элементы                        ║
+║   14. Reduce (сумма)                                        ║
+║      Вычислить сумму всех элементов                         ║
+║   15. Sort                                                  ║
+║      Отсортировать дек по возрастанию                       ║
+║   16. MergeSorted с другим отсортированным деком            ║
+║      Слить два отсортированных дека                         ║
+╠══════════════════════════════════════════════════════════════╣
+║  ПРОВЕРКА                                                   ║
+║   17. Запустить модульные тесты                             ║
+║      Проверить корректность реализации                      ║
+╠══════════════════════════════════════════════════════════════╣
+║   0. Выход                                                  ║
+║      Завершить работу программы                             ║
+╚══════════════════════════════════════════════════════════════╝
+)";
+
+template<class T>
+T ReadNumber(const std::string& prompt) {
+    T value{};
+    std::cout << prompt;
+    std::cin >> value;
+    return value;
 }
 
-void RequireDeque(SegmentedDeque<int>* deque) {
+void ShowMenu() {
+    std::cout << kMenu << "> ";
+}
+
+void RequireDeque(IntDeque* deque) {
     if (deque == nullptr) {
-        throw std::runtime_error("Сначала создайте дек");
+        throw InvalidState("сначала создайте дек");
     }
 }
 
-bool IsImmutable(const SegmentedDeque<int>* deque) {
-    return dynamic_cast<const ImmutableSegmentedDeque<int>*>(deque) != nullptr;
+bool IsImmutable(const IntDeque* deque) {
+    return dynamic_cast<const ImmutableIntDeque*>(deque) != nullptr;
 }
 
-void UpdateCurrentDeque(SegmentedDeque<int>*& current, SegmentedDeque<int>* updated) {
+void ReplaceDeque(IntDeque*& current, IntDeque* updated) {
     if (updated != current) {
         delete current;
         current = updated;
     }
 }
 
-void PrintDeque(const std::string& label, const SegmentedDeque<int>& deque) {
+void PrintDeque(const std::string& label, const IntDeque& deque) {
     std::cout << "\n" << label << ": [";
     for (int i = 0; i < deque.GetLength(); i++) {
-        std::cout << deque.Get(i);
-        if (i + 1 < deque.GetLength()) {
+        if (i > 0) {
             std::cout << ", ";
         }
+        std::cout << deque.Get(i);
     }
     std::cout << "]" << std::endl;
 }
 
-void PrintDequeSummary(const SegmentedDeque<int>& deque) {
+void PrintSummary(const IntDeque& deque) {
     std::cout << "Тип: " << (IsImmutable(&deque) ? "ImmutableSegmentedDeque" : "MutableSegmentedDeque") << std::endl;
     std::cout << "Хранилище блоков: " << DequeStorageKindToString(deque.GetStorageKind()) << std::endl;
     std::cout << "Длина: " << deque.GetLength() << std::endl;
     std::cout << "Layout: " << deque.DescribeLayout() << std::endl;
 }
 
+void PrintState(const std::string& label, const IntDeque& deque) {
+    PrintDeque(label, deque);
+    PrintSummary(deque);
+}
+
 DequeStorageKind ReadStorageKind() {
-    int choice = 1;
-    std::cout << "Выберите хранилище блоков (1 - ArraySequence, 2 - ListSequence): ";
-    std::cin >> choice;
-    return choice == 2 ? DequeStorageKind::ListSequence : DequeStorageKind::ArraySequence;
+    return ReadNumber<int>("Выберите хранилище блоков (1 - ArraySequence, 2 - ListSequence): ") == 2
+        ? DequeStorageKind::ListSequence
+        : DequeStorageKind::ArraySequence;
 }
 
 bool ReadImmutableFlag() {
-    int choice = 1;
-    std::cout << "Выберите тип дека (1 - mutable, 2 - immutable): ";
-    std::cin >> choice;
-    return choice == 2;
+    return ReadNumber<int>("Выберите тип дека (1 - mutable, 2 - immutable): ") == 2;
 }
 
-std::vector<int> ReadValues() {
-    int count = 0;
-    std::cout << "Количество элементов: ";
-    std::cin >> count;
+IntValues ReadValues() {
+    int count = ReadNumber<int>("Количество элементов: ");
     if (count < 0) {
-        throw std::invalid_argument("Количество элементов должно быть неотрицательным");
+        throw InvalidArgument("количество элементов должно быть неотрицательным");
     }
 
-    std::vector<int> values(count);
+    IntValues values;
+    values.Reserve(count);
     for (int i = 0; i < count; i++) {
-        std::cout << "Элемент [" << i << "]: ";
-        std::cin >> values[i];
+        values.Append(ReadNumber<int>("Элемент [" + std::to_string(i) + "]: "));
     }
     return values;
 }
 
-SegmentedDeque<int>* BuildDeque(
+IntValues GenerateRandomValues(int count, int minValue, int maxValue, unsigned int seed) {
+    if (count < 0) {
+        throw InvalidArgument("количество элементов должно быть неотрицательным");
+    }
+    if (minValue > maxValue) {
+        throw InvalidArgument("минимальное значение не может быть больше максимального");
+    }
+
+    std::mt19937 generator(seed);
+    std::uniform_int_distribution<int> distribution(minValue, maxValue);
+
+    IntValues values;
+    values.Reserve(count);
+    for (int i = 0; i < count; i++) {
+        values.Append(distribution(generator));
+    }
+    return values;
+}
+
+IntDeque* BuildDeque(
     bool immutable,
     int blockCapacity,
     DequeStorageKind storageKind,
-    const std::vector<int>& values
+    const IntValues& values
 ) {
     if (immutable) {
-        return new ImmutableSegmentedDeque<int>(
-            values.data(),
-            static_cast<int>(values.size()),
+        return new ImmutableIntDeque(
+            values.RawData(),
+            values.GetSize(),
             blockCapacity,
             storageKind
         );
     }
 
-    return new MutableSegmentedDeque<int>(
-        values.data(),
-        static_cast<int>(values.size()),
+    return new MutableIntDeque(
+        values.RawData(),
+        values.GetSize(),
         blockCapacity,
         storageKind
     );
 }
 
-}  // namespace
+MutableIntDeque BuildHelperDeque(const IntDeque& reference, const IntValues& values) {
+    return MutableIntDeque(
+        values.RawData(),
+        values.GetSize(),
+        reference.GetBlockCapacity(),
+        reference.GetStorageKind()
+    );
+}
+
+void ReplaceWithNewDeque(
+    IntDeque*& current,
+    bool immutable,
+    int blockCapacity,
+    DequeStorageKind storageKind,
+    const IntValues& values,
+    const std::string& label
+) {
+    delete current;
+    current = BuildDeque(immutable, blockCapacity, storageKind, values);
+    PrintState(label, *current);
+}
+
+void CreateManualDeque(IntDeque*& current) {
+    bool immutable = ReadImmutableFlag();
+    DequeStorageKind storageKind = ReadStorageKind();
+    int blockCapacity = ReadNumber<int>("Размер одного сегмента: ");
+    ReplaceWithNewDeque(
+        current,
+        immutable,
+        blockCapacity,
+        storageKind,
+        ReadValues(),
+        "Созданный дек"
+    );
+}
+
+void CreateRandomDeque(IntDeque*& current) {
+    bool immutable = ReadImmutableFlag();
+    DequeStorageKind storageKind = ReadStorageKind();
+    int blockCapacity = ReadNumber<int>("Размер одного сегмента: ");
+    int count = ReadNumber<int>("Количество элементов: ");
+    int minValue = ReadNumber<int>("Минимальное значение: ");
+    int maxValue = ReadNumber<int>("Максимальное значение: ");
+    unsigned int seed = ReadNumber<unsigned int>("Seed генератора: ");
+
+    ReplaceWithNewDeque(
+        current,
+        immutable,
+        blockCapacity,
+        storageKind,
+        GenerateRandomValues(count, minValue, maxValue, seed),
+        "Случайно сгенерированный дек"
+    );
+}
+
+MutableIntDeque ReadPeerDeque(const IntDeque& current, const std::string& title) {
+    std::cout << title << std::endl;
+    return BuildHelperDeque(current, ReadValues());
+}
+
+template<class Operation>
+void ApplyAndShow(IntDeque*& current, const std::string& label, Operation operation) {
+    RequireDeque(current);
+    ReplaceDeque(current, operation(*current));
+    PrintDeque(label, *current);
+}
+
+}  
 
 int main() {
     setlocale(LC_ALL, "Russian");
 
-    SegmentedDeque<int>* current = nullptr;
+    IntDeque* current = nullptr;
 
     std::cout << "\nЛабораторная работа №3 - дек с сегментированным буфером" << std::endl;
     std::cout << "==========================================================" << std::endl;
@@ -149,76 +269,26 @@ int main() {
 
         try {
             switch (choice) {
-                case 1: {
-                    bool immutable = ReadImmutableFlag();
-                    DequeStorageKind storageKind = ReadStorageKind();
-                    int blockCapacity = 0;
-                    std::cout << "Размер одного сегмента: ";
-                    std::cin >> blockCapacity;
-                    std::vector<int> values = ReadValues();
-
-                    delete current;
-                    current = BuildDeque(immutable, blockCapacity, storageKind, values);
-                    PrintDeque("Созданный дек", *current);
-                    PrintDequeSummary(*current);
+                case 1:
+                    CreateManualDeque(current);
                     break;
-                }
-                case 2: {
-                    bool immutable = ReadImmutableFlag();
-                    DequeStorageKind storageKind = ReadStorageKind();
-                    int blockCapacity = 0;
-                    int count = 0;
-                    int minValue = 0;
-                    int maxValue = 0;
-                    unsigned int seed = 0;
-
-                    std::cout << "Размер одного сегмента: ";
-                    std::cin >> blockCapacity;
-                    std::cout << "Количество элементов: ";
-                    std::cin >> count;
-                    std::cout << "Минимальное значение: ";
-                    std::cin >> minValue;
-                    std::cout << "Максимальное значение: ";
-                    std::cin >> maxValue;
-                    std::cout << "Seed генератора: ";
-                    std::cin >> seed;
-
-                    std::vector<int> values;
-                    values.reserve(count);
-                    auto* generated = GenerateRandomIntDeque(count, blockCapacity, minValue, maxValue, seed, storageKind);
-                    for (int i = 0; i < generated->GetLength(); i++) {
-                        values.push_back(generated->Get(i));
-                    }
-                    delete generated;
-
-                    delete current;
-                    current = BuildDeque(immutable, blockCapacity, storageKind, values);
-                    PrintDeque("Случайно сгенерированный дек", *current);
-                    PrintDequeSummary(*current);
+                case 2:
+                    CreateRandomDeque(current);
                     break;
-                }
-                case 3: {
-                    RequireDeque(current);
-                    int value = 0;
-                    std::cout << "Введите значение: ";
-                    std::cin >> value;
-                    UpdateCurrentDeque(current, current->PushFront(value));
-                    PrintDeque("После PushFront", *current);
+                case 3:
+                    ApplyAndShow(current, "После PushFront", [&](IntDeque& deque) {
+                        return deque.PushFront(ReadNumber<int>("Введите значение: "));
+                    });
                     break;
-                }
-                case 4: {
-                    RequireDeque(current);
-                    int value = 0;
-                    std::cout << "Введите значение: ";
-                    std::cin >> value;
-                    UpdateCurrentDeque(current, current->PushBack(value));
-                    PrintDeque("После PushBack", *current);
+                case 4:
+                    ApplyAndShow(current, "После PushBack", [&](IntDeque& deque) {
+                        return deque.PushBack(ReadNumber<int>("Введите значение: "));
+                    });
                     break;
-                }
                 case 5: {
                     RequireDeque(current);
                     int removed = current->Front();
-                    UpdateCurrentDeque(current, current->PopFront());
+                    ReplaceDeque(current, current->PopFront());
                     std::cout << "Удалён элемент с начала: " << removed << std::endl;
                     PrintDeque("После PopFront", *current);
                     break;
@@ -226,117 +296,84 @@ int main() {
                 case 6: {
                     RequireDeque(current);
                     int removed = current->Back();
-                    UpdateCurrentDeque(current, current->PopBack());
+                    ReplaceDeque(current, current->PopBack());
                     std::cout << "Удалён элемент с конца: " << removed << std::endl;
                     PrintDeque("После PopBack", *current);
                     break;
                 }
-                case 7: {
+                case 7:
                     RequireDeque(current);
-                    PrintDeque("Текущий дек", *current);
-                    PrintDequeSummary(*current);
+                    PrintState("Текущий дек", *current);
                     break;
-                }
-                case 8: {
+                case 8:
                     RequireDeque(current);
                     std::cout << "\n" << current->DescribeLayout() << std::endl;
                     break;
-                }
                 case 9: {
                     RequireDeque(current);
-                    std::cout << "Введите элементы второго дека" << std::endl;
-                    std::vector<int> values = ReadValues();
-                    MutableSegmentedDeque<int> other(
-                        values.data(),
-                        static_cast<int>(values.size()),
-                        current->GetBlockCapacity(),
-                        current->GetStorageKind()
-                    );
-
-                    UpdateCurrentDeque(current, current->Concat(other));
-                    PrintDeque("После Concat", *current);
+                    MutableIntDeque other = ReadPeerDeque(*current, "Введите элементы второго дека");
+                    ApplyAndShow(current, "После Concat", [&](IntDeque& deque) {
+                        return deque.Concat(other);
+                    });
                     break;
                 }
                 case 10: {
-                    RequireDeque(current);
-                    int start = 0;
-                    int end = 0;
-                    std::cout << "Начальный индекс: ";
-                    std::cin >> start;
-                    std::cout << "Конечный индекс: ";
-                    std::cin >> end;
-
-                    UpdateCurrentDeque(current, current->GetSubDeque(start, end));
-                    PrintDeque("Извлечённый поддек", *current);
+                    int start = ReadNumber<int>("Начальный индекс: ");
+                    int end = ReadNumber<int>("Конечный индекс: ");
+                    ApplyAndShow(current, "Извлечённый поддек", [&](IntDeque& deque) {
+                        return deque.GetSubDeque(start, end);
+                    });
                     break;
                 }
                 case 11: {
                     RequireDeque(current);
-                    std::cout << "Введите элементы шаблона для поиска" << std::endl;
-                    std::vector<int> values = ReadValues();
-                    MutableSegmentedDeque<int> pattern(
-                        values.data(),
-                        static_cast<int>(values.size()),
-                        current->GetBlockCapacity(),
-                        current->GetStorageKind()
-                    );
-
+                    MutableIntDeque pattern = ReadPeerDeque(*current, "Введите элементы шаблона для поиска");
                     int index = current->FindSubDeque(pattern);
-                    if (index >= 0) {
-                        std::cout << "Подпоследовательность найдена с индекса " << index << std::endl;
-                    } else {
-                        std::cout << "Подпоследовательность не найдена" << std::endl;
-                    }
+                    std::cout << (index >= 0
+                        ? "Подпоследовательность найдена с индекса " + std::to_string(index)
+                        : "Подпоследовательность не найдена")
+                              << std::endl;
                     break;
                 }
-                case 12: {
+                case 12:
+                    ApplyAndShow(current, "После Map(x * 2)", [](IntDeque& deque) {
+                        return deque.Map([](const int& value) { return value * 2; });
+                    });
+                    break;
+                case 13:
+                    ApplyAndShow(current, "После Where(even)", [](IntDeque& deque) {
+                        return deque.Where([](const int& value) { return value % 2 == 0; });
+                    });
+                    break;
+                case 14:
                     RequireDeque(current);
-                    UpdateCurrentDeque(current, current->Map([](const int& value) { return value * 2; }));
-                    PrintDeque("После Map(x * 2)", *current);
+                    std::cout << "Сумма элементов = "
+                              << current->Reduce([](const int& value, const int& acc) { return value + acc; }, 0)
+                              << std::endl;
                     break;
-                }
-                case 13: {
-                    RequireDeque(current);
-                    UpdateCurrentDeque(current, current->Where([](const int& value) { return value % 2 == 0; }));
-                    PrintDeque("После Where(even)", *current);
+                case 15:
+                    ApplyAndShow(current, "После Sort", [](IntDeque& deque) {
+                        return deque.Sorted();
+                    });
                     break;
-                }
-                case 14: {
-                    RequireDeque(current);
-                    int sum = current->Reduce([](const int& value, const int& acc) { return value + acc; }, 0);
-                    std::cout << "Сумма элементов = " << sum << std::endl;
-                    break;
-                }
-                case 15: {
-                    RequireDeque(current);
-                    UpdateCurrentDeque(current, current->Sorted());
-                    PrintDeque("После Sort", *current);
-                    break;
-                }
                 case 16: {
                     RequireDeque(current);
-                    std::cout << "Введите второй дек, элементы должны быть отсортированы" << std::endl;
-                    std::vector<int> values = ReadValues();
-                    MutableSegmentedDeque<int> other(
-                        values.data(),
-                        static_cast<int>(values.size()),
-                        current->GetBlockCapacity(),
-                        current->GetStorageKind()
+                    MutableIntDeque other = ReadPeerDeque(
+                        *current,
+                        "Введите второй дек, элементы должны быть отсортированы"
                     );
-
-                    UpdateCurrentDeque(current, current->MergeSorted(other));
-                    PrintDeque("После MergeSorted", *current);
+                    ApplyAndShow(current, "После MergeSorted", [&](IntDeque& deque) {
+                        return deque.MergeSorted(other);
+                    });
                     break;
                 }
-                case 17: {
+                case 17:
                     RunAllTests();
                     break;
-                }
-                case 0: {
+                case 0:
                     delete current;
                     std::cout << "\nВыход из программы..." << std::endl;
                     return 0;
-                }
                 default:
                     std::cout << "Неизвестный пункт меню" << std::endl;
                     break;

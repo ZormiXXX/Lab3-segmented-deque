@@ -1,0 +1,3245 @@
+===== ./Makefile =====
+
+CXX = g++
+CXXFLAGS = -std=c++17 -Wall -Wextra -I./include
+
+SRC_DIR = src
+BUILD_DIR = build
+
+MAIN_TARGET = $(BUILD_DIR)/lab3
+TEST_TARGET = $(BUILD_DIR)/lab3_tests
+
+MAIN_OBJECTS = $(BUILD_DIR)/main.o $(BUILD_DIR)/tests.o
+TEST_OBJECTS = $(BUILD_DIR)/tests.o $(BUILD_DIR)/tests_main.o
+
+all: $(BUILD_DIR) $(MAIN_TARGET) $(TEST_TARGET)
+
+$(BUILD_DIR):
+	@mkdir -p $(BUILD_DIR)
+
+$(MAIN_TARGET): $(MAIN_OBJECTS)
+	@echo "Линковка $(MAIN_TARGET)..."
+	$(CXX) $(CXXFLAGS) -o $@ $^
+
+$(TEST_TARGET): $(TEST_OBJECTS)
+	@echo "Линковка $(TEST_TARGET)..."
+	$(CXX) $(CXXFLAGS) -o $@ $^
+
+$(BUILD_DIR)/%.o: $(SRC_DIR)/%.cpp | $(BUILD_DIR)
+	@echo "Компиляция $<..."
+	$(CXX) $(CXXFLAGS) -c $< -o $@
+
+run: $(MAIN_TARGET)
+	@echo "Запуск программы..."
+	./$(MAIN_TARGET)
+
+test: $(TEST_TARGET)
+	@echo "Запуск тестов..."
+	./$(TEST_TARGET)
+
+clean:
+	@echo "Очистка..."
+	rm -rf $(BUILD_DIR)
+
+rebuild: clean all
+
+help:
+	@echo "Доступные команды:"
+	@echo "  make        - Собрать основную программу и тесты"
+	@echo "  make run    - Запустить интерактивный CLI"
+	@echo "  make test   - Запустить модульные тесты"
+	@echo "  make clean  - Удалить build/"
+	@echo "  make rebuild- Пересобрать всё заново"
+
+.PHONY: all run test clean rebuild help
+
+
+===== ./include/ArraySequence.hpp =====
+
+#pragma once
+#include "DynamicArray.hpp"
+#include "LinkedList.hpp"
+#include "Sequence.hpp"
+
+template<class T>
+class ImmutableArraySequence;
+
+template<class T>
+class ArraySequence : public SequenceCRTP<T, ArraySequence<T>> {
+    template<class, class>
+    friend class SequenceCRTP;
+
+    template<class>
+    friend class ImmutableArraySequence;
+
+protected:
+    DynamicArray<T>* items;
+
+    virtual ArraySequence<T>* Clone() const {
+        return new ArraySequence<T>(*this);
+    }
+
+    virtual ArraySequence<T>* Instance(int expectedLength) {
+        (void)expectedLength;
+        return this;
+    }
+
+    void AppendInternal(const T& item) {
+        items->Append(item);
+    }
+
+    void PrependInternal(const T& item) {
+        items->InsertAt(0, item);
+    }
+
+    void InsertAtInternal(const T& item, int index) {
+        if (index < 0 || index >= items->GetSize()) {
+            throw IndexOutOfRange(index, items->GetSize());
+        }
+        items->InsertAt(index, item);
+    }
+
+    void ConcatInternal(const Sequence<T>* other) {
+        int originalLength = GetLength();
+        int otherLength = other->GetLength();
+        items->Reserve(originalLength + otherLength);
+
+        if (other == this) {
+            for (int i = 0; i < originalLength; i++) {
+                AppendInternal(items->Get(i));
+            }
+            return;
+        }
+
+        IEnumerator<T>* enumerator = other->GetEnumerator();
+        while (enumerator->MoveNext()) {
+            AppendInternal(enumerator->GetCurrent());
+        }
+        delete enumerator;
+    }
+
+public:
+    ArraySequence() : items(new DynamicArray<T>()) {}
+
+    explicit ArraySequence(int expectedLength) : items(new DynamicArray<T>()) {
+        items->Reserve(expectedLength);
+    }
+
+    ArraySequence(const T* arr, int count) : items(new DynamicArray<T>(arr, count)) {}
+
+    ArraySequence(DynamicArray<T>* arr) : items(arr) {}
+
+    ArraySequence(const ArraySequence<T>& other) : items(new DynamicArray<T>(*other.items)) {}
+
+    ArraySequence(const LinkedList<T>& list) : items(new DynamicArray<T>(list.GetLength())) {
+        list.CopyToArray(items->RawData());
+    }
+
+    ArraySequence(const LinkedList<T>* list) : ArraySequence(*list) {}
+
+    ~ArraySequence() override {
+        delete items;
+    }
+
+    DynamicArray<T>* CopyStorage() const {
+        return new DynamicArray<T>(*items);
+    }
+
+    DynamicArray<T>* CopyStorage(int minCapacity) const {
+        return new DynamicArray<T>(*items, minCapacity);
+    }
+
+    DynamicArray<T>* ReleaseStorage() {
+        DynamicArray<T>* released = items;
+        items = nullptr;
+        return released;
+    }
+
+    const T& Get(int index) const override {
+        return items->Get(index);
+    }
+
+    int GetLength() const override {
+        return items->GetSize();
+    }
+
+    const T& GetFirst() const override {
+        return items->Get(0);
+    }
+
+    const T& GetLast() const override {
+        if (GetLength() == 0) {
+            throw IndexOutOfRange(0, GetLength());
+        }
+        return items->Get(GetLength() - 1);
+    }
+
+    Sequence<T>* CreateEmpty() const override {
+        return new ArraySequence<T>();
+    }
+
+    Sequence<T>* CreateFromArray(const T* source, int count) const override {
+        return new ArraySequence<T>(source, count);
+    }
+
+    IEnumerator<T>* GetEnumerator() const override {
+        return items->GetEnumerator();
+    }
+
+    Sequence<T>* GetSubsequence(int start, int end) const override {
+        if (start < 0 || end >= GetLength() || start > end) {
+            throw IndexOutOfRange(start, GetLength());
+        }
+
+        Sequence<T>* result = this->CreateAccumulator(end - start + 1);
+        for (int i = start; i <= end; i++) {
+            Sequence<T>* updated = result->Append(items->Get(i));
+            if (updated != result) {
+                delete result;
+            }
+            result = updated;
+        }
+        return this->FinalizeAccumulator(result);
+    }
+
+    T& operator[](int index) {
+        return (*items)[index];
+    }
+
+    const T& operator[](int index) const {
+        return (*items)[index];
+    }
+};
+
+
+===== ./include/DynamicArray.hpp =====
+
+#pragma once
+#include "Exceptions.hpp"
+#include "IEnumerator.hpp"
+
+template<class T>
+class DynamicArray {
+private:
+    T* data;
+    int size;
+    int capacity;
+
+    void EnsureCapacity(int minCapacity) {
+        if (capacity >= minCapacity) return;
+
+        int newCapacity = capacity == 0 ? 4 : capacity * 2;
+        while (newCapacity < minCapacity) newCapacity *= 2;
+
+        T* newData = new T[newCapacity];
+        for (int i = 0; i < size; i++) {
+            newData[i] = data[i];
+        }
+        delete[] data;
+        data = newData;
+        capacity = newCapacity;
+    }
+
+public:
+    class Enumerator : public IEnumerator<T> {
+    private:
+        const DynamicArray<T>* array;
+        int index;
+
+    public:
+        explicit Enumerator(const DynamicArray<T>* source) : array(source), index(-1) {}
+
+        bool MoveNext() override {
+            if (index + 1 >= array->size) {
+                return false;
+            }
+            index++;
+            return true;
+        }
+
+        const T& GetCurrent() const override {
+            if (index < 0 || index >= array->size) {
+                throw IndexOutOfRange(index, array->size);
+            }
+            return array->data[index];
+        }
+
+        void Reset() override {
+            index = -1;
+        }
+    };
+
+    DynamicArray() : data(nullptr), size(0), capacity(0) {}
+
+    DynamicArray(const T* items, int count) : size(count), capacity(count) {
+        if (count < 0) {
+            throw IndexOutOfRange(count, 0);
+        }
+        data = count > 0 ? new T[count] : nullptr;
+        for (int i = 0; i < count; i++) {
+            data[i] = items[i];
+        }
+    }
+
+    DynamicArray(int size) : size(size), capacity(size) {
+        if (size < 0) {
+            throw IndexOutOfRange(size, 0);
+        }
+        data = size > 0 ? new T[size] : nullptr;
+        for (int i = 0; i < size; i++) {
+            data[i] = T();
+        }
+    }
+
+    DynamicArray(const DynamicArray<T>& other) : size(other.size), capacity(other.capacity) {
+        data = capacity > 0 ? new T[capacity] : nullptr;
+        for (int i = 0; i < size; i++) {
+            data[i] = other.data[i];
+        }
+    }
+
+    DynamicArray(const DynamicArray<T>& other, int minCapacity) : size(other.size), capacity(other.capacity) {
+        if (minCapacity < 0) {
+            throw IndexOutOfRange(minCapacity, 0);
+        }
+        if (capacity < minCapacity) {
+            capacity = minCapacity;
+        }
+        if (capacity < size) {
+            capacity = size;
+        }
+        data = capacity > 0 ? new T[capacity] : nullptr;
+        for (int i = 0; i < size; i++) {
+            data[i] = other.data[i];
+        }
+    }
+
+    DynamicArray(DynamicArray<T>&& other) noexcept
+        : data(other.data), size(other.size), capacity(other.capacity) {
+        other.data = nullptr;
+        other.size = 0;
+        other.capacity = 0;
+    }
+
+    ~DynamicArray() {
+        delete[] data;
+    }
+
+    DynamicArray<T>& operator=(const DynamicArray<T>& other) {
+        if (this != &other) {
+            T* newData = other.capacity > 0 ? new T[other.capacity] : nullptr;
+            for (int i = 0; i < other.size; i++) {
+                newData[i] = other.data[i];
+            }
+            delete[] data;
+            data = newData;
+            size = other.size;
+            capacity = other.capacity;
+        }
+        return *this;
+    }
+
+    DynamicArray<T>& operator=(DynamicArray<T>&& other) noexcept {
+        if (this != &other) {
+            delete[] data;
+            data = other.data;
+            size = other.size;
+            capacity = other.capacity;
+            other.data = nullptr;
+            other.size = 0;
+            other.capacity = 0;
+        }
+        return *this;
+    }
+
+    const T& Get(int index) const {
+        if (index < 0 || index >= size) {
+            throw IndexOutOfRange(index, size);
+        }
+        return data[index];
+    }
+
+    void Set(int index, const T& value) {
+        if (index < 0 || index >= size) {
+            throw IndexOutOfRange(index, size);
+        }
+        data[index] = value;
+    }
+
+    void Reserve(int minCapacity) {
+        if (minCapacity < 0) {
+            throw IndexOutOfRange(minCapacity, 0);
+        }
+        EnsureCapacity(minCapacity);
+    }
+
+    void Append(const T& value) {
+        EnsureCapacity(size + 1);
+        data[size] = value;
+        size++;
+    }
+
+    void InsertAt(int index, const T& value) {
+        if (index < 0 || index > size) {
+            throw IndexOutOfRange(index, size);
+        }
+
+        EnsureCapacity(size + 1);
+        for (int i = size; i > index; i--) {
+            data[i] = data[i - 1];
+        }
+        data[index] = value;
+        size++;
+    }
+
+    int GetSize() const {
+        return size;
+    }
+
+    int GetCapacity() const {
+        return capacity;
+    }
+
+    T* RawData() {
+        return data;
+    }
+
+    const T* RawData() const {
+        return data;
+    }
+
+    IEnumerator<T>* GetEnumerator() const {
+        return new Enumerator(this);
+    }
+
+    void Resize(int newSize) {
+        if (newSize < 0) throw IndexOutOfRange(newSize, 0);
+
+        EnsureCapacity(newSize);
+
+        if (newSize > size) {
+            for (int i = size; i < newSize; i++) {
+                data[i] = T();
+            }
+        }
+        size = newSize;
+    }
+
+    T& operator[](int index) {
+        if (index < 0 || index >= size) {
+            throw IndexOutOfRange(index, size);
+        }
+        return data[index];
+    }
+
+    const T& operator[](int index) const {
+        if (index < 0 || index >= size) {
+            throw IndexOutOfRange(index, size);
+        }
+        return data[index];
+    }
+};
+
+
+===== ./include/Exceptions.hpp =====
+
+#pragma once
+#include <string>
+
+class Exception {
+protected:
+    std::string message;
+
+public:
+    Exception() = default;
+
+    explicit Exception(const std::string& text) : message(text) {}
+
+    virtual ~Exception() = default;
+
+    virtual const char* what() const noexcept {
+        return message.c_str();
+    }
+};
+
+class IndexOutOfRange : public Exception {
+private:
+public:
+    IndexOutOfRange(int index, int size)
+        : Exception("IndexOutOfRange: index=" + std::to_string(index) +
+                    ", size=" + std::to_string(size)) {}
+};
+
+class InvalidArgument : public Exception {
+public:
+    explicit InvalidArgument(const std::string& details)
+        : Exception("InvalidArgument: " + details) {}
+};
+
+class InvalidState : public Exception {
+public:
+    explicit InvalidState(const std::string& details)
+        : Exception("InvalidState: " + details) {}
+};
+
+class InputError : public Exception {
+public:
+    explicit InputError(const std::string& details)
+        : Exception("InputError: " + details) {}
+};
+
+class EmptyCollection : public Exception {
+public:
+    EmptyCollection() : Exception("EmptyCollection: collection is empty") {}
+};
+
+class ElementNotFound : public Exception {
+public:
+    ElementNotFound() : Exception("ElementNotFound: no matching element was found") {}
+};
+
+class NoValuePresent : public Exception {
+public:
+    NoValuePresent() : Exception("NoValuePresent: trying to get value from None") {}
+};
+
+
+===== ./include/IEnumerable.hpp =====
+
+#pragma once
+#include "IEnumerator.hpp"
+
+template<class T>
+class IEnumerable {
+public:
+    virtual ~IEnumerable() = default;
+    virtual IEnumerator<T>* GetEnumerator() const = 0;
+};
+
+
+
+===== ./include/IEnumerator.hpp =====
+
+#pragma once
+
+template<class T>
+class IEnumerator {
+public:
+    virtual ~IEnumerator() = default;
+    virtual bool MoveNext() = 0;
+    virtual const T& GetCurrent() const = 0;
+    virtual void Reset() = 0;
+};
+
+
+===== ./include/Immutable/ImmutableArraySequence.hpp =====
+
+#pragma once
+#include "../ArraySequence.hpp"
+
+template<class T>
+class ImmutableArraySequence : public ArraySequence<T> {
+protected:
+    ImmutableArraySequence<T>* Clone() const override {
+        return new ImmutableArraySequence<T>(*this);
+    }
+
+    Sequence<T>* CreateAccumulator() const override {
+        return new ArraySequence<T>();
+    }
+
+    Sequence<T>* CreateAccumulator(int expectedLength) const override {
+        return new ArraySequence<T>(expectedLength);
+    }
+
+    Sequence<T>* FinalizeAccumulator(Sequence<T>* accumulator) const override {
+        auto* builder = static_cast<ArraySequence<T>*>(accumulator);
+        Sequence<T>* result = new ImmutableArraySequence<T>(builder->ReleaseStorage());
+        delete accumulator;
+        return result;
+    }
+
+    ImmutableArraySequence<T>* Instance(int expectedLength) override {
+        return new ImmutableArraySequence<T>(this->CopyStorage(expectedLength));
+    }
+
+public:
+    ImmutableArraySequence() : ArraySequence<T>() {}
+
+    ImmutableArraySequence(const T* arr, int count) : ArraySequence<T>(arr, count) {}
+
+    explicit ImmutableArraySequence(DynamicArray<T>* arr) : ArraySequence<T>(arr) {}
+
+    ImmutableArraySequence(const ImmutableArraySequence<T>& other)
+        : ArraySequence<T>(new DynamicArray<T>(*other.items)) {}
+
+    explicit ImmutableArraySequence(const LinkedList<T>& list) : ArraySequence<T>(list) {}
+
+    explicit ImmutableArraySequence(const LinkedList<T>* list) : ArraySequence<T>(list) {}
+
+    ~ImmutableArraySequence() override = default;
+
+    Sequence<T>* CreateEmpty() const override {
+        return new ImmutableArraySequence<T>();
+    }
+
+    Sequence<T>* CreateFromArray(const T* items, int count) const override {
+        return new ImmutableArraySequence<T>(items, count);
+    }
+};
+
+
+===== ./include/Immutable/ImmutableListSequence.hpp =====
+
+#pragma once
+#include "../ListSequence.hpp"
+
+template<class T>
+class ImmutableListSequence : public ListSequence<T> {
+protected:
+    ImmutableListSequence<T>* Clone() const override {
+        return new ImmutableListSequence<T>(*this);
+    }
+
+    Sequence<T>* CreateAccumulator() const override {
+        return new ListSequence<T>();
+    }
+
+    Sequence<T>* CreateAccumulator(int expectedLength) const override {
+        (void)expectedLength;
+        return new ListSequence<T>();
+    }
+
+    Sequence<T>* FinalizeAccumulator(Sequence<T>* accumulator) const override {
+        auto* builder = static_cast<ListSequence<T>*>(accumulator);
+        Sequence<T>* result = new ImmutableListSequence<T>(builder->ReleaseStorage());
+        delete accumulator;
+        return result;
+    }
+
+    ImmutableListSequence<T>* Instance(int expectedLength) override {
+        (void)expectedLength;
+        return Clone();
+    }
+
+public:
+    ImmutableListSequence() : ListSequence<T>() {}
+
+    ImmutableListSequence(const T* arr, int count) : ListSequence<T>(arr, count) {}
+
+    ImmutableListSequence(const ImmutableListSequence<T>& other)
+        : ListSequence<T>(new LinkedList<T>(*other.items)) {}
+
+    explicit ImmutableListSequence(const LinkedList<T>& list) : ListSequence<T>(list) {}
+
+    explicit ImmutableListSequence(const LinkedList<T>* list) : ListSequence<T>(list) {}
+
+    explicit ImmutableListSequence(LinkedList<T>* list) : ListSequence<T>(list) {}
+
+    ~ImmutableListSequence() override = default;
+
+    Sequence<T>* CreateEmpty() const override {
+        return new ImmutableListSequence<T>();
+    }
+
+    Sequence<T>* CreateFromArray(const T* items, int count) const override {
+        return new ImmutableListSequence<T>(items, count);
+    }
+};
+
+
+===== ./include/Immutable/ImmutableSegmentedDeque.hpp =====
+
+#pragma once
+
+#include "../SegmentedDeque.hpp"
+
+template<class T>
+class ImmutableSegmentedDeque : public SegmentedDeque<T> {
+protected:
+    ImmutableSegmentedDeque<T>* Instance() override {
+        return new ImmutableSegmentedDeque<T>(*this);
+    }
+
+    ImmutableSegmentedDeque<T>* CreateEmptySameKind() const override {
+        return new ImmutableSegmentedDeque<T>(this->blockCapacity, this->storageKind);
+    }
+
+public:
+    explicit ImmutableSegmentedDeque(
+        int blockCapacityValue = 8,
+        DequeStorageKind kind = DequeStorageKind::ArraySequence
+    )
+        : SegmentedDeque<T>(blockCapacityValue, kind) {}
+
+    ImmutableSegmentedDeque(
+        const T* items,
+        int count,
+        int blockCapacityValue = 8,
+        DequeStorageKind kind = DequeStorageKind::ArraySequence
+    )
+        : SegmentedDeque<T>(items, count, blockCapacityValue, kind) {}
+
+    ImmutableSegmentedDeque(const ImmutableSegmentedDeque<T>& other)
+        : SegmentedDeque<T>(other) {}
+};
+
+
+===== ./include/InversionAlgorithms.hpp =====
+
+#pragma once
+
+#include "MapIndexed.hpp"
+#include "Mutable/MutableListSequence.hpp"
+#include "Mutable/MutableSegmentedDeque.hpp"
+#include "SegmentedDeque.hpp"
+#include <functional>
+#include <random>
+
+template<class T, class Compare = std::less<T>>
+long long CountInversionsMapReduce(const SegmentedDeque<T>& deque, Compare compare = Compare{}) {
+    Sequence<T>* flat = deque.ToSequence();
+    Sequence<long long>* localCounts = MapIndexed<T, long long>(
+        *flat,
+        [&](const T& value, int index) {
+            long long local = 0;
+            for (int j = index + 1; j < flat->GetLength(); j++) {
+                if (compare(flat->Get(j), value)) {
+                    local++;
+                }
+            }
+            return local;
+        }
+    );
+
+    long long total = localCounts->Reduce(
+        [](long long value, long long acc) { return value + acc; },
+        0LL
+    );
+
+    delete localCounts;
+    delete flat;
+    return total;
+}
+
+template<class T, class Compare = std::less<T>>
+long long CountInversionsMultiPass(const SegmentedDeque<T>& deque, Compare compare = Compare{}) {
+    long long total = 0;
+    for (int i = 0; i < deque.GetLength(); i++) {
+        for (int j = i + 1; j < deque.GetLength(); j++) {
+            if (compare(deque.Get(j), deque.Get(i))) {
+                total++;
+            }
+        }
+    }
+    return total;
+}
+
+template<class T, class Compare = std::less<T>>
+long long CountInversionsOnePass(const SegmentedDeque<T>& deque, Compare compare = Compare{}) {
+    MutableListSequence<T> sortedSeen;
+    long long total = 0;
+
+    for (int i = 0; i < deque.GetLength(); i++) {
+        T value = deque.Get(i);
+        int insertPosition = 0;
+
+        while (insertPosition < sortedSeen.GetLength() &&
+               !compare(value, sortedSeen.Get(insertPosition))) {
+            insertPosition++;
+        }
+
+        total += sortedSeen.GetLength() - insertPosition;
+
+        if (sortedSeen.GetLength() == 0) {
+            sortedSeen.Append(value);
+        } else if (insertPosition == 0) {
+            sortedSeen.Prepend(value);
+        } else if (insertPosition == sortedSeen.GetLength()) {
+            sortedSeen.Append(value);
+        } else {
+            sortedSeen.InsertAt(value, insertPosition);
+        }
+    }
+
+    return total;
+}
+
+inline MutableSegmentedDeque<int>* GenerateRandomIntDeque(
+    int count,
+    int blockCapacity,
+    int minValue,
+    int maxValue,
+    unsigned int seed,
+    DequeStorageKind storageKind = DequeStorageKind::ArraySequence
+) {
+    auto* result = new MutableSegmentedDeque<int>(blockCapacity, storageKind);
+    std::mt19937 generator(seed);
+    std::uniform_int_distribution<int> distribution(minValue, maxValue);
+
+    for (int i = 0; i < count; i++) {
+        result->PushBack(distribution(generator));
+    }
+
+    return result;
+}
+
+
+===== ./include/LinkedList.hpp =====
+
+#pragma once
+#include "Exceptions.hpp"
+#include "IEnumerator.hpp"
+
+template<class T>
+class LinkedList {
+private:
+    struct Node {
+        T value;
+        Node* next;
+        Node(const T& val) : value(val), next(nullptr) {}
+    };
+
+    Node* head;
+    Node* tail;
+    int length;
+
+public:
+    class Enumerator : public IEnumerator<T> {
+    private:
+        const LinkedList<T>* list;
+        const Node* current;
+        bool started;
+
+    public:
+        explicit Enumerator(const LinkedList<T>* source)
+            : list(source), current(nullptr), started(false) {}
+
+        bool MoveNext() override {
+            if (!started) {
+                current = list->head;
+                started = true;
+            } else if (current != nullptr) {
+                current = current->next;
+            }
+            return current != nullptr;
+        }
+
+        const T& GetCurrent() const override {
+            if (current == nullptr) {
+                throw InvalidState("enumerator is not positioned on an element");
+            }
+            return current->value;
+        }
+
+        void Reset() override {
+            current = nullptr;
+            started = false;
+        }
+    };
+
+private:
+    void Clear() {
+        Node* current = head;
+        while (current != nullptr) {
+            Node* next = current->next;
+            delete current;
+            current = next;
+        }
+        head = nullptr;
+        tail = nullptr;
+        length = 0;
+    }
+
+    Node* GetNode(int index) const {
+        if (index < 0 || index >= length) {
+            throw IndexOutOfRange(index, length);
+        }
+        Node* current = head;
+        for (int i = 0; i < index; i++) {
+            current = current->next;
+        }
+        return current;
+    }
+
+    void CopyFrom(const LinkedList<T>& other) {
+        length = 0;
+        head = nullptr;
+        tail = nullptr;
+
+        Node* current = other.head;
+        while (current != nullptr) {
+            Append(current->value);
+            current = current->next;
+        }
+    }
+
+public:
+    LinkedList() : head(nullptr), tail(nullptr), length(0) {}
+
+    LinkedList(const T* items, int count) : head(nullptr), tail(nullptr), length(0) {
+        if (count < 0) {
+            throw IndexOutOfRange(count, 0);
+        }
+        for (int i = 0; i < count; i++) {
+            Append(items[i]);
+        }
+    }
+
+    LinkedList(const LinkedList<T>& other) : head(nullptr), tail(nullptr), length(0) {
+        CopyFrom(other);
+    }
+
+    LinkedList(LinkedList<T>&& other) noexcept
+        : head(other.head), tail(other.tail), length(other.length) {
+        other.head = nullptr;
+        other.tail = nullptr;
+        other.length = 0;
+    }
+
+    ~LinkedList() {
+        Clear();
+    }
+
+    LinkedList<T>& operator=(const LinkedList<T>& other) {
+        if (this != &other) {
+            Clear();
+            CopyFrom(other);
+        }
+        return *this;
+    }
+
+    LinkedList<T>& operator=(LinkedList<T>&& other) noexcept {
+        if (this != &other) {
+            Clear();
+            head = other.head;
+            tail = other.tail;
+            length = other.length;
+            other.head = nullptr;
+            other.tail = nullptr;
+            other.length = 0;
+        }
+        return *this;
+    }
+
+    const T& GetFirst() const {
+        if (length == 0) {
+            throw IndexOutOfRange(0, length);
+        }
+        return head->value;
+    }
+
+    const T& GetLast() const {
+        if (length == 0) {
+            throw IndexOutOfRange(0, length);
+        }
+        return tail->value;
+    }
+
+    const T& Get(int index) const {
+        return GetNode(index)->value;
+    }
+
+    LinkedList<T>* GetSubList(int start, int end) const {
+        if (start < 0 || end >= length || start > end) {
+            throw IndexOutOfRange(start, length);
+        }
+
+        LinkedList<T>* result = new LinkedList<T>();
+        Node* current = head;
+        for (int i = 0; i < start; i++) {
+            current = current->next;
+        }
+        for (int i = start; i <= end; i++) {
+            result->Append(current->value);
+            current = current->next;
+        }
+        return result;
+    }
+
+    int GetLength() const {
+        return length;
+    }
+
+    void CopyToArray(T* destination) const {
+        Node* current = head;
+        int index = 0;
+        while (current != nullptr) {
+            destination[index++] = current->value;
+            current = current->next;
+        }
+    }
+
+    IEnumerator<T>* GetEnumerator() const {
+        return new Enumerator(this);
+    }
+
+    void Append(const T& item) {
+        Node* newNode = new Node(item);
+        if (length == 0) {
+            head = tail = newNode;
+        } else {
+            tail->next = newNode;
+            tail = newNode;
+        }
+        length++;
+    }
+
+    void Prepend(const T& item) {
+        Node* newNode = new Node(item);
+        if (length == 0) {
+            head = tail = newNode;
+        } else {
+            newNode->next = head;
+            head = newNode;
+        }
+        length++;
+    }
+
+    void InsertAt(const T& item, int index) {
+        if (index < 0 || index >= length) {
+            throw IndexOutOfRange(index, length);
+        }
+
+        if (index == 0) {
+            Prepend(item);
+            return;
+        }
+
+        Node* prev = GetNode(index - 1);
+        Node* newNode = new Node(item);
+        newNode->next = prev->next;
+        prev->next = newNode;
+        length++;
+    }
+
+    LinkedList<T>* Concat(const LinkedList<T>* list) const {
+        LinkedList<T>* result = new LinkedList<T>(*this);
+        Node* current = list->head;
+        while (current != nullptr) {
+            result->Append(current->value);
+            current = current->next;
+        }
+        return result;
+    }
+
+    T& operator[](int index) {
+        return GetNode(index)->value;
+    }
+
+    const T& operator[](int index) const {
+        return GetNode(index)->value;
+    }
+};
+
+
+===== ./include/ListSequence.hpp =====
+
+#pragma once
+#include "LinkedList.hpp"
+#include "Sequence.hpp"
+
+template<class T>
+class ImmutableListSequence;
+
+template<class T>
+class ListSequence : public SequenceCRTP<T, ListSequence<T>> {
+    template<class, class>
+    friend class SequenceCRTP;
+
+    template<class>
+    friend class ImmutableListSequence;
+
+protected:
+    LinkedList<T>* items;
+
+    virtual ListSequence<T>* Clone() const {
+        return new ListSequence<T>(*this);
+    }
+
+    virtual ListSequence<T>* Instance(int expectedLength) {
+        (void)expectedLength;
+        return this;
+    }
+
+    void AppendInternal(const T& item) {
+        items->Append(item);
+    }
+
+    void PrependInternal(const T& item) {
+        items->Prepend(item);
+    }
+
+    void InsertAtInternal(const T& item, int index) {
+        items->InsertAt(item, index);
+    }
+
+    void ConcatInternal(const Sequence<T>* other) {
+        int limit = other == this ? GetLength() : other->GetLength();
+        IEnumerator<T>* enumerator = other->GetEnumerator();
+        int copied = 0;
+        while (copied < limit && enumerator->MoveNext()) {
+            items->Append(enumerator->GetCurrent());
+            copied++;
+        }
+        delete enumerator;
+    }
+
+public:
+    ListSequence() : items(new LinkedList<T>()) {}
+
+    ListSequence(const T* arr, int count) : items(new LinkedList<T>(arr, count)) {}
+
+    ListSequence(const ListSequence<T>& other) : items(new LinkedList<T>(*other.items)) {}
+
+    explicit ListSequence(const LinkedList<T>& list) : items(new LinkedList<T>(list)) {}
+
+    explicit ListSequence(const LinkedList<T>* list) : items(new LinkedList<T>(*list)) {}
+
+    explicit ListSequence(LinkedList<T>* list) : items(list) {}
+
+    ~ListSequence() override {
+        delete items;
+    }
+
+    LinkedList<T>* CopyStorage() const {
+        return new LinkedList<T>(*items);
+    }
+
+    LinkedList<T>* ReleaseStorage() {
+        LinkedList<T>* released = items;
+        items = nullptr;
+        return released;
+    }
+
+    const T& Get(int index) const override {
+        return items->Get(index);
+    }
+
+    int GetLength() const override {
+        return items->GetLength();
+    }
+
+    const T& GetFirst() const override {
+        return items->GetFirst();
+    }
+
+    const T& GetLast() const override {
+        return items->GetLast();
+    }
+
+    Sequence<T>* CreateEmpty() const override {
+        return new ListSequence<T>();
+    }
+
+    Sequence<T>* CreateFromArray(const T* itemsArr, int count) const override {
+        return new ListSequence<T>(itemsArr, count);
+    }
+
+    IEnumerator<T>* GetEnumerator() const override {
+        return items->GetEnumerator();
+    }
+
+    Sequence<T>* GetSubsequence(int start, int end) const override {
+        if (start < 0 || end >= GetLength() || start > end) {
+            throw IndexOutOfRange(start, GetLength());
+        }
+
+        Sequence<T>* result = this->CreateAccumulator(end - start + 1);
+        IEnumerator<T>* enumerator = items->GetEnumerator();
+        int index = 0;
+        while (enumerator->MoveNext()) {
+            if (index > end) {
+                break;
+            }
+            if (index >= start) {
+                Sequence<T>* updated = result->Append(enumerator->GetCurrent());
+                if (updated != result) {
+                    delete result;
+                }
+                result = updated;
+            }
+            index++;
+        }
+        delete enumerator;
+        return this->FinalizeAccumulator(result);
+    }
+};
+
+
+===== ./include/MapIndexed.hpp =====
+
+#pragma once
+
+#include "Mutable/MutableArraySequence.hpp"
+#include "Sequence.hpp"
+
+template<class T, class U, class Func>
+Sequence<U>* MapIndexed(const Sequence<T>& sequence, Func mapper) {
+    Sequence<U>* result = new MutableArraySequence<U>();
+    for (int i = 0; i < sequence.GetLength(); i++) {
+        Sequence<U>* updated = result->Append(mapper(sequence.Get(i), i));
+        if (updated != result) {
+            delete result;
+            result = updated;
+        }
+    }
+    return result;
+}
+
+
+===== ./include/Mutable/MutableArraySequence.hpp =====
+
+#pragma once
+#include "../ArraySequence.hpp"
+
+template<class T>
+class MutableArraySequence : public ArraySequence<T> {
+protected:
+    MutableArraySequence<T>* Clone() const override {
+        return new MutableArraySequence<T>(*this);
+    }
+
+    MutableArraySequence<T>* Instance(int expectedLength) override {
+        this->items->Reserve(expectedLength);
+        return this;
+    }
+
+public:
+    MutableArraySequence() : ArraySequence<T>() {}
+
+    MutableArraySequence(const T* arr, int count) : ArraySequence<T>(arr, count) {}
+
+    explicit MutableArraySequence(DynamicArray<T>* arr) : ArraySequence<T>(arr) {}
+
+    MutableArraySequence(const MutableArraySequence<T>& other)
+        : ArraySequence<T>(new DynamicArray<T>(*other.items)) {}
+
+    explicit MutableArraySequence(const LinkedList<T>& list) : ArraySequence<T>(list) {}
+
+    explicit MutableArraySequence(const LinkedList<T>* list) : ArraySequence<T>(list) {}
+
+    ~MutableArraySequence() override = default;
+
+    Sequence<T>* CreateEmpty() const override {
+        return new MutableArraySequence<T>();
+    }
+
+    Sequence<T>* CreateFromArray(const T* items, int count) const override {
+        return new MutableArraySequence<T>(items, count);
+    }
+};
+
+
+===== ./include/Mutable/MutableListSequence.hpp =====
+
+#pragma once
+#include "../ListSequence.hpp"
+
+template<class T>
+class MutableListSequence : public ListSequence<T> {
+protected:
+    MutableListSequence<T>* Clone() const override {
+        return new MutableListSequence<T>(*this);
+    }
+
+    MutableListSequence<T>* Instance(int expectedLength) override {
+        (void)expectedLength;
+        return this;
+    }
+
+    Sequence<T>* CreateAccumulator(int expectedLength) const override {
+        (void)expectedLength;
+        return new MutableListSequence<T>();
+    }
+
+public:
+    MutableListSequence() : ListSequence<T>() {}
+
+    MutableListSequence(const T* arr, int count) : ListSequence<T>(arr, count) {}
+
+    MutableListSequence(const MutableListSequence<T>& other)
+        : ListSequence<T>(new LinkedList<T>(*other.items)) {}
+
+    explicit MutableListSequence(const LinkedList<T>& list) : ListSequence<T>(list) {}
+
+    explicit MutableListSequence(const LinkedList<T>* list) : ListSequence<T>(list) {}
+
+    ~MutableListSequence() override = default;
+
+    Sequence<T>* CreateEmpty() const override {
+        return new MutableListSequence<T>();
+    }
+
+    Sequence<T>* CreateFromArray(const T* items, int count) const override {
+        return new MutableListSequence<T>(items, count);
+    }
+};
+
+
+===== ./include/Mutable/MutableSegmentedDeque.hpp =====
+
+#pragma once
+
+#include "../SegmentedDeque.hpp"
+
+template<class T>
+class MutableSegmentedDeque : public SegmentedDeque<T> {
+protected:
+    MutableSegmentedDeque<T>* Instance() override {
+        return this;
+    }
+
+    MutableSegmentedDeque<T>* CreateEmptySameKind() const override {
+        return new MutableSegmentedDeque<T>(this->blockCapacity, this->storageKind);
+    }
+
+public:
+    explicit MutableSegmentedDeque(
+        int blockCapacityValue = 8,
+        DequeStorageKind kind = DequeStorageKind::ArraySequence
+    )
+        : SegmentedDeque<T>(blockCapacityValue, kind) {}
+
+    MutableSegmentedDeque(
+        const T* items,
+        int count,
+        int blockCapacityValue = 8,
+        DequeStorageKind kind = DequeStorageKind::ArraySequence
+    )
+        : SegmentedDeque<T>(items, count, blockCapacityValue, kind) {}
+
+    MutableSegmentedDeque(const MutableSegmentedDeque<T>& other)
+        : SegmentedDeque<T>(other) {}
+};
+
+
+===== ./include/Option.hpp =====
+
+#pragma once
+#include "Exceptions.hpp"
+
+template<class T>
+class Option {
+private:
+    T* value;
+
+    void Clear() {
+        delete value;
+        value = nullptr;
+    }
+
+public:
+    Option() : value(nullptr) {}
+
+    Option(const Option<T>& other) : value(nullptr) {
+        if (other.value != nullptr) {
+            value = new T(*other.value);
+        }
+    }
+
+    Option(Option<T>&& other) noexcept : value(other.value) {
+        other.value = nullptr;
+    }
+
+    ~Option() {
+        Clear();
+    }
+
+    Option<T>& operator=(const Option<T>& other) {
+        if (this != &other) {
+            Clear();
+            if (other.value != nullptr) {
+                value = new T(*other.value);
+            }
+        }
+        return *this;
+    }
+
+    Option<T>& operator=(Option<T>&& other) noexcept {
+        if (this != &other) {
+            Clear();
+            value = other.value;
+            other.value = nullptr;
+        }
+        return *this;
+    }
+
+    static Option<T> None() {
+        return Option<T>();
+    }
+
+    static Option<T> Some(const T& val) {
+        Option<T> opt;
+        opt.value = new T(val);
+        return opt;
+    }
+
+    bool IsSome() const {
+        return value != nullptr;
+    }
+
+    bool IsNone() const {
+        return value == nullptr;
+    }
+
+    const T& GetValue() const {
+        if (value == nullptr) {
+            throw NoValuePresent();
+        }
+        return *value;
+    }
+
+    T GetValueOrDefault(const T& defaultVal) const {
+        if (value == nullptr) {
+            return defaultVal;
+        }
+        return *value;
+    }
+};
+
+
+===== ./include/SegmentedDeque.hpp =====
+
+#pragma once
+
+#include "ArraySequence.hpp"
+#include "DynamicArray.hpp"
+#include "Exceptions.hpp"
+#include "ListSequence.hpp"
+#include "Sequence.hpp"
+#include <functional>
+#include <string>
+
+enum class DequeStorageKind {
+    ArraySequence,
+    ListSequence
+};
+
+inline std::string DequeStorageKindToString(DequeStorageKind kind) {
+    return kind == DequeStorageKind::ArraySequence ? "ArraySequence" : "ListSequence";
+}
+
+template<class T>
+class SegmentedDeque {
+protected:
+    struct Block {
+        DynamicArray<T> data;
+        int begin;
+        int end;
+
+        Block(int capacity, int startIndex);
+        Block(const Block& other);
+
+        int Capacity() const;
+        int Size() const;
+        bool Empty() const;
+        bool CanPushFront() const;
+        bool CanPushBack() const;
+
+        void PushFront(const T& item);
+        void PushBack(const T& item);
+        void PopFront();
+        void PopBack();
+        const T& Get(int index) const;
+    };
+
+    template<class Pointer>
+    static void ReplaceOwned(Pointer*& current, Pointer* updated);
+
+    template<class U>
+    static void AppendOwned(Sequence<U>*& sequence, const U& value);
+
+    static void AppendDequeTo(SegmentedDeque<T>& target, const SegmentedDeque<T>& source);
+    static void AppendSequenceTo(SegmentedDeque<T>& target, const Sequence<T>& source);
+
+    Sequence<Block*>* blocks;
+    int blockCapacity;
+    int totalSize;
+    DequeStorageKind storageKind;
+
+    virtual SegmentedDeque<T>* Instance() = 0;
+    virtual SegmentedDeque<T>* CreateEmptySameKind() const = 0;
+
+    template<class U>
+    Sequence<U>* CreateSequenceForKind() const;
+
+    Sequence<Block*>* CreateBlockSequence(DequeStorageKind kind) const;
+    void DestroyBlocks();
+    Block* MakeBlock(int startIndex) const;
+    Block* EnsureFrontBlockForPush();
+    Block* EnsureBackBlockForPush();
+    void RemoveBoundaryBlock(bool fromFront);
+    const Block& FindBlock(int index, int& localIndex) const;
+    const T& GetRef(int index) const;
+
+    template<class Visitor>
+    void ForEachElement(Visitor visitor) const;
+
+    template<class Visitor>
+    void ForEachBlock(Visitor visitor) const;
+
+    SegmentedDeque<T>* BuildFromSequence(const Sequence<T>& source) const;
+
+    template<class Transformer>
+    SegmentedDeque<T>* BuildFromTransformedSequence(Transformer transform) const;
+
+    void PushBackDirect(const T& item);
+    void PushFrontDirect(const T& item);
+    void PopFrontDirect();
+    void PopBackDirect();
+
+public:
+    explicit SegmentedDeque(
+        int blockCapacityValue = 8,
+        DequeStorageKind kind = DequeStorageKind::ArraySequence
+    );
+
+    SegmentedDeque(
+        const T* items,
+        int count,
+        int blockCapacityValue = 8,
+        DequeStorageKind kind = DequeStorageKind::ArraySequence
+    );
+
+    SegmentedDeque(const SegmentedDeque<T>& other);
+    SegmentedDeque<T>& operator=(const SegmentedDeque<T>&) = delete;
+    virtual ~SegmentedDeque();
+
+    int GetLength() const;
+    int GetBlockCapacity() const;
+    int GetSegmentCount() const;
+    DequeStorageKind GetStorageKind() const;
+    bool IsEmpty() const;
+
+    T Get(int index) const;
+    T Front() const;
+    T Back() const;
+
+    SegmentedDeque<T>* PushFront(const T& item);
+    SegmentedDeque<T>* PushBack(const T& item);
+    SegmentedDeque<T>* PopFront();
+    SegmentedDeque<T>* PopBack();
+
+    SegmentedDeque<T>* Concat(const SegmentedDeque<T>& other) const;
+    SegmentedDeque<T>* GetSubDeque(int start, int end) const;
+    int FindSubDeque(const SegmentedDeque<T>& pattern) const;
+    bool ContainsSubDeque(const SegmentedDeque<T>& pattern) const;
+
+    SegmentedDeque<T>* Map(const std::function<T(const T&)>& mapper) const;
+    SegmentedDeque<T>* Where(const std::function<bool(const T&)>& predicate) const;
+    T Reduce(const std::function<T(const T&, const T&)>& reducer, const T& initial) const;
+
+    SegmentedDeque<T>* Sorted(
+        const std::function<bool(const T&, const T&)>& comparator = std::less<T>()
+    ) const;
+
+    SegmentedDeque<T>* MergeSorted(
+        const SegmentedDeque<T>& other,
+        const std::function<bool(const T&, const T&)>& comparator = std::less<T>()
+    ) const;
+
+    Sequence<T>* ToSequence() const;
+    std::string DescribeLayout() const;
+
+    T operator[](int index) const {
+        return Get(index);
+    }
+};
+
+#include "SegmentedDeque.tpp"
+
+
+===== ./include/SegmentedDeque.tpp =====
+
+#pragma once
+
+template<class T>
+SegmentedDeque<T>::Block::Block(int capacity, int startIndex)
+    : data(capacity), begin(startIndex), end(startIndex) {}
+
+template<class T>
+SegmentedDeque<T>::Block::Block(const Block& other)
+    : data(other.data), begin(other.begin), end(other.end) {}
+
+template<class T>
+int SegmentedDeque<T>::Block::Capacity() const {
+    return data.GetSize();
+}
+
+template<class T>
+int SegmentedDeque<T>::Block::Size() const {
+    return end - begin;
+}
+
+template<class T>
+bool SegmentedDeque<T>::Block::Empty() const {
+    return begin == end;
+}
+
+template<class T>
+bool SegmentedDeque<T>::Block::CanPushFront() const {
+    return begin > 0;
+}
+
+template<class T>
+bool SegmentedDeque<T>::Block::CanPushBack() const {
+    return end < Capacity();
+}
+
+template<class T>
+void SegmentedDeque<T>::Block::PushFront(const T& item) {
+    if (!CanPushFront()) {
+        throw InvalidState("front side of block is full");
+    }
+    data.Set(--begin, item);
+}
+
+template<class T>
+void SegmentedDeque<T>::Block::PushBack(const T& item) {
+    if (!CanPushBack()) {
+        throw InvalidState("back side of block is full");
+    }
+    data.Set(end++, item);
+}
+
+template<class T>
+void SegmentedDeque<T>::Block::PopFront() {
+    if (Empty()) {
+        throw EmptyCollection();
+    }
+    begin++;
+}
+
+template<class T>
+void SegmentedDeque<T>::Block::PopBack() {
+    if (Empty()) {
+        throw EmptyCollection();
+    }
+    end--;
+}
+
+template<class T>
+const T& SegmentedDeque<T>::Block::Get(int index) const {
+    if (index < 0 || index >= Size()) {
+        throw IndexOutOfRange(index, Size());
+    }
+    return data.Get(begin + index);
+}
+
+template<class T>
+template<class Pointer>
+void SegmentedDeque<T>::ReplaceOwned(Pointer*& current, Pointer* updated) {
+    if (updated != current) {
+        delete current;
+        current = updated;
+    }
+}
+
+template<class T>
+template<class U>
+void SegmentedDeque<T>::AppendOwned(Sequence<U>*& sequence, const U& value) {
+    ReplaceOwned(sequence, sequence->Append(value));
+}
+
+template<class T>
+void SegmentedDeque<T>::AppendDequeTo(SegmentedDeque<T>& target, const SegmentedDeque<T>& source) {
+    for (int i = 0; i < source.GetLength(); i++) {
+        target.PushBackDirect(source.Get(i));
+    }
+}
+
+template<class T>
+void SegmentedDeque<T>::AppendSequenceTo(SegmentedDeque<T>& target, const Sequence<T>& source) {
+    IEnumerator<T>* enumerator = source.GetEnumerator();
+    while (enumerator->MoveNext()) {
+        target.PushBackDirect(enumerator->GetCurrent());
+    }
+    delete enumerator;
+}
+
+template<class T>
+template<class U>
+Sequence<U>* SegmentedDeque<T>::CreateSequenceForKind() const {
+    return storageKind == DequeStorageKind::ArraySequence
+        ? static_cast<Sequence<U>*>(new ArraySequence<U>())
+        : static_cast<Sequence<U>*>(new ListSequence<U>());
+}
+
+template<class T>
+Sequence<typename SegmentedDeque<T>::Block*>* SegmentedDeque<T>::CreateBlockSequence(
+    DequeStorageKind kind
+) const {
+    return kind == DequeStorageKind::ArraySequence
+        ? static_cast<Sequence<Block*>*>(new ArraySequence<Block*>())
+        : static_cast<Sequence<Block*>*>(new ListSequence<Block*>());
+}
+
+template<class T>
+void SegmentedDeque<T>::DestroyBlocks() {
+    if (blocks == nullptr) {
+        return;
+    }
+    for (int i = 0; i < blocks->GetLength(); i++) {
+        delete blocks->Get(i);
+    }
+}
+
+template<class T>
+typename SegmentedDeque<T>::Block* SegmentedDeque<T>::MakeBlock(int startIndex) const {
+    return new Block(blockCapacity, startIndex);
+}
+
+template<class T>
+typename SegmentedDeque<T>::Block* SegmentedDeque<T>::EnsureFrontBlockForPush() {
+    if (blocks->GetLength() == 0) {
+        ReplaceOwned(blocks, blocks->Append(MakeBlock(blockCapacity / 2)));
+    }
+
+    Block* first = blocks->GetFirst();
+    if (!first->CanPushFront()) {
+        ReplaceOwned(blocks, blocks->Prepend(MakeBlock(blockCapacity)));
+        first = blocks->GetFirst();
+    }
+    return first;
+}
+
+template<class T>
+typename SegmentedDeque<T>::Block* SegmentedDeque<T>::EnsureBackBlockForPush() {
+    if (blocks->GetLength() == 0) {
+        ReplaceOwned(blocks, blocks->Append(MakeBlock(blockCapacity / 2)));
+    }
+
+    Block* last = blocks->GetLast();
+    if (!last->CanPushBack()) {
+        ReplaceOwned(blocks, blocks->Append(MakeBlock(0)));
+        last = blocks->GetLast();
+    }
+    return last;
+}
+
+template<class T>
+void SegmentedDeque<T>::RemoveBoundaryBlock(bool fromFront) {
+    const int index = fromFront ? 0 : blocks->GetLength() - 1;
+    delete blocks->Get(index);
+    ReplaceOwned(blocks, blocks->Slice(index, 1));
+}
+
+template<class T>
+const typename SegmentedDeque<T>::Block& SegmentedDeque<T>::FindBlock(int index, int& localIndex) const {
+    int offset = index;
+    for (int i = 0; i < blocks->GetLength(); i++) {
+        Block* block = blocks->Get(i);
+        if (offset < block->Size()) {
+            localIndex = offset;
+            return *block;
+        }
+        offset -= block->Size();
+    }
+
+    throw IndexOutOfRange(index, totalSize);
+}
+
+template<class T>
+const T& SegmentedDeque<T>::GetRef(int index) const {
+    if (index < 0 || index >= totalSize) {
+        throw IndexOutOfRange(index, totalSize);
+    }
+
+    int localIndex = 0;
+    return FindBlock(index, localIndex).Get(localIndex);
+}
+
+template<class T>
+template<class Visitor>
+void SegmentedDeque<T>::ForEachElement(Visitor visitor) const {
+    for (int i = 0; i < blocks->GetLength(); i++) {
+        Block* block = blocks->Get(i);
+        for (int j = 0; j < block->Size(); j++) {
+            visitor(block->Get(j));
+        }
+    }
+}
+
+template<class T>
+template<class Visitor>
+void SegmentedDeque<T>::ForEachBlock(Visitor visitor) const {
+    for (int i = 0; i < blocks->GetLength(); i++) {
+        visitor(*blocks->Get(i), i);
+    }
+}
+
+template<class T>
+SegmentedDeque<T>* SegmentedDeque<T>::BuildFromSequence(const Sequence<T>& source) const {
+    SegmentedDeque<T>* result = CreateEmptySameKind();
+    AppendSequenceTo(*result, source);
+    return result;
+}
+
+template<class T>
+template<class Transformer>
+SegmentedDeque<T>* SegmentedDeque<T>::BuildFromTransformedSequence(Transformer transform) const {
+    Sequence<T>* source = ToSequence();
+    Sequence<T>* transformed = transform(*source);
+    SegmentedDeque<T>* result = BuildFromSequence(*transformed);
+    delete transformed;
+    delete source;
+    return result;
+}
+
+template<class T>
+void SegmentedDeque<T>::PushBackDirect(const T& item) {
+    EnsureBackBlockForPush()->PushBack(item);
+    totalSize++;
+}
+
+template<class T>
+void SegmentedDeque<T>::PushFrontDirect(const T& item) {
+    EnsureFrontBlockForPush()->PushFront(item);
+    totalSize++;
+}
+
+template<class T>
+void SegmentedDeque<T>::PopFrontDirect() {
+    if (IsEmpty()) {
+        throw EmptyCollection();
+    }
+
+    Block* first = blocks->GetFirst();
+    first->PopFront();
+    totalSize--;
+
+    if (first->Empty()) {
+        RemoveBoundaryBlock(true);
+    }
+}
+
+template<class T>
+void SegmentedDeque<T>::PopBackDirect() {
+    if (IsEmpty()) {
+        throw EmptyCollection();
+    }
+
+    Block* last = blocks->GetLast();
+    last->PopBack();
+    totalSize--;
+
+    if (last->Empty()) {
+        RemoveBoundaryBlock(false);
+    }
+}
+
+template<class T>
+SegmentedDeque<T>::SegmentedDeque(int blockCapacityValue, DequeStorageKind kind)
+    : blocks(nullptr), blockCapacity(blockCapacityValue), totalSize(0), storageKind(kind) {
+    if (blockCapacityValue <= 0) {
+        throw InvalidArgument("blockCapacity must be positive");
+    }
+    blocks = CreateBlockSequence(storageKind);
+}
+
+template<class T>
+SegmentedDeque<T>::SegmentedDeque(
+    const T* items,
+    int count,
+    int blockCapacityValue,
+    DequeStorageKind kind
+)
+    : SegmentedDeque(blockCapacityValue, kind) {
+    if (count < 0) {
+        throw InvalidArgument("count must be non-negative");
+    }
+    for (int i = 0; i < count; i++) {
+        PushBackDirect(items[i]);
+    }
+}
+
+template<class T>
+SegmentedDeque<T>::SegmentedDeque(const SegmentedDeque<T>& other)
+    : blocks(nullptr),
+      blockCapacity(other.blockCapacity),
+      totalSize(other.totalSize),
+      storageKind(other.storageKind) {
+    blocks = CreateBlockSequence(storageKind);
+    other.ForEachBlock([&](const Block& block, int) {
+        ReplaceOwned(blocks, blocks->Append(new Block(block)));
+    });
+}
+
+template<class T>
+SegmentedDeque<T>::~SegmentedDeque() {
+    DestroyBlocks();
+    delete blocks;
+}
+
+template<class T>
+int SegmentedDeque<T>::GetLength() const {
+    return totalSize;
+}
+
+template<class T>
+int SegmentedDeque<T>::GetBlockCapacity() const {
+    return blockCapacity;
+}
+
+template<class T>
+int SegmentedDeque<T>::GetSegmentCount() const {
+    return blocks->GetLength();
+}
+
+template<class T>
+DequeStorageKind SegmentedDeque<T>::GetStorageKind() const {
+    return storageKind;
+}
+
+template<class T>
+bool SegmentedDeque<T>::IsEmpty() const {
+    return totalSize == 0;
+}
+
+template<class T>
+T SegmentedDeque<T>::Get(int index) const {
+    return GetRef(index);
+}
+
+template<class T>
+T SegmentedDeque<T>::Front() const {
+    if (IsEmpty()) {
+        throw EmptyCollection();
+    }
+    return blocks->GetFirst()->Get(0);
+}
+
+template<class T>
+T SegmentedDeque<T>::Back() const {
+    if (IsEmpty()) {
+        throw EmptyCollection();
+    }
+    Block* last = blocks->GetLast();
+    return last->Get(last->Size() - 1);
+}
+
+template<class T>
+SegmentedDeque<T>* SegmentedDeque<T>::PushFront(const T& item) {
+    SegmentedDeque<T>* result = Instance();
+    result->PushFrontDirect(item);
+    return result;
+}
+
+template<class T>
+SegmentedDeque<T>* SegmentedDeque<T>::PushBack(const T& item) {
+    SegmentedDeque<T>* result = Instance();
+    result->PushBackDirect(item);
+    return result;
+}
+
+template<class T>
+SegmentedDeque<T>* SegmentedDeque<T>::PopFront() {
+    SegmentedDeque<T>* result = Instance();
+    result->PopFrontDirect();
+    return result;
+}
+
+template<class T>
+SegmentedDeque<T>* SegmentedDeque<T>::PopBack() {
+    SegmentedDeque<T>* result = Instance();
+    result->PopBackDirect();
+    return result;
+}
+
+template<class T>
+SegmentedDeque<T>* SegmentedDeque<T>::Concat(const SegmentedDeque<T>& other) const {
+    SegmentedDeque<T>* result = CreateEmptySameKind();
+    AppendDequeTo(*result, *this);
+    AppendDequeTo(*result, other);
+    return result;
+}
+
+template<class T>
+SegmentedDeque<T>* SegmentedDeque<T>::GetSubDeque(int start, int end) const {
+    if (start < 0 || end >= GetLength() || start > end) {
+        throw IndexOutOfRange(start, GetLength());
+    }
+    return BuildFromTransformedSequence([&](const Sequence<T>& source) {
+        return source.GetSubsequence(start, end);
+    });
+}
+
+template<class T>
+int SegmentedDeque<T>::FindSubDeque(const SegmentedDeque<T>& pattern) const {
+    if (pattern.GetLength() == 0) {
+        return 0;
+    }
+    if (pattern.GetLength() > GetLength()) {
+        return -1;
+    }
+
+    for (int start = 0; start <= GetLength() - pattern.GetLength(); start++) {
+        bool matched = true;
+        for (int offset = 0; offset < pattern.GetLength(); offset++) {
+            if (!(GetRef(start + offset) == pattern.Get(offset))) {
+                matched = false;
+                break;
+            }
+        }
+        if (matched) {
+            return start;
+        }
+    }
+
+    return -1;
+}
+
+template<class T>
+bool SegmentedDeque<T>::ContainsSubDeque(const SegmentedDeque<T>& pattern) const {
+    return FindSubDeque(pattern) >= 0;
+}
+
+template<class T>
+SegmentedDeque<T>* SegmentedDeque<T>::Map(const std::function<T(const T&)>& mapper) const {
+    return BuildFromTransformedSequence([&](const Sequence<T>& source) {
+        return source.Map(mapper);
+    });
+}
+
+template<class T>
+SegmentedDeque<T>* SegmentedDeque<T>::Where(const std::function<bool(const T&)>& predicate) const {
+    return BuildFromTransformedSequence([&](const Sequence<T>& source) {
+        return source.Where(predicate);
+    });
+}
+
+template<class T>
+T SegmentedDeque<T>::Reduce(
+    const std::function<T(const T&, const T&)>& reducer,
+    const T& initial
+) const {
+    Sequence<T>* source = ToSequence();
+    T result = source->Reduce(reducer, initial);
+    delete source;
+    return result;
+}
+
+template<class T>
+SegmentedDeque<T>* SegmentedDeque<T>::Sorted(
+    const std::function<bool(const T&, const T&)>& comparator
+) const {
+    DynamicArray<T> values;
+    values.Reserve(GetLength());
+    ForEachElement([&](const T& item) {
+        values.Append(item);
+    });
+
+    for (int i = 1; i < values.GetSize(); i++) {
+        T current = values[i];
+        int j = i - 1;
+        while (j >= 0 && comparator(current, values[j])) {
+            values[j + 1] = values[j];
+            j--;
+        }
+        values[j + 1] = current;
+    }
+
+    SegmentedDeque<T>* result = CreateEmptySameKind();
+    for (int i = 0; i < values.GetSize(); i++) {
+        result->PushBackDirect(values[i]);
+    }
+    return result;
+}
+
+template<class T>
+SegmentedDeque<T>* SegmentedDeque<T>::MergeSorted(
+    const SegmentedDeque<T>& other,
+    const std::function<bool(const T&, const T&)>& comparator
+) const {
+    SegmentedDeque<T>* result = CreateEmptySameKind();
+
+    int left = 0;
+    int right = 0;
+    while (left < GetLength() && right < other.GetLength()) {
+        if (comparator(other.Get(right), GetRef(left))) {
+            result->PushBackDirect(other.Get(right++));
+        } else {
+            result->PushBackDirect(GetRef(left++));
+        }
+    }
+
+    while (left < GetLength()) {
+        result->PushBackDirect(GetRef(left++));
+    }
+
+    while (right < other.GetLength()) {
+        result->PushBackDirect(other.Get(right++));
+    }
+
+    return result;
+}
+
+template<class T>
+Sequence<T>* SegmentedDeque<T>::ToSequence() const {
+    Sequence<T>* result = CreateSequenceForKind<T>();
+    ForEachElement([&](const T& item) {
+        AppendOwned(result, item);
+    });
+    return result;
+}
+
+template<class T>
+std::string SegmentedDeque<T>::DescribeLayout() const {
+    std::string result = "storage=" + DequeStorageKindToString(storageKind)
+                       + ", blockCapacity=" + std::to_string(blockCapacity)
+                       + ", segments=" + std::to_string(GetSegmentCount())
+                       + ", fills=[";
+
+    ForEachBlock([&](const Block& block, int index) {
+        if (index > 0) {
+            result += ", ";
+        }
+        result += std::to_string(block.Size());
+    });
+
+    result += "]";
+    return result;
+}
+
+
+===== ./include/Sequence.hpp =====
+
+#pragma once
+#include "Exceptions.hpp"
+#include "IEnumerable.hpp"
+#include "Option.hpp"
+
+template<class T>
+class ArraySequence;
+
+template<class T>
+class Sequence;
+
+template<class T, class Derived>
+class SequenceCRTP;
+
+template<class First, class Second>
+struct Tuple {
+    First first;
+    Second second;
+
+    Tuple() : first(), second() {}
+
+    Tuple(const First& firstValue, const Second& secondValue)
+        : first(firstValue), second(secondValue) {}
+};
+
+template<class TupleType>
+struct TupleTraits;
+
+template<class First, class Second>
+struct TupleTraits<Tuple<First, Second>> {
+    using FirstType = First;
+    using SecondType = Second;
+};
+
+template<class First, class Second>
+struct SequencePair {
+    Sequence<First>* first;
+    Sequence<Second>* second;
+};
+
+template<class T>
+class SequenceEnumerator : public IEnumerator<T> {
+private:
+    const Sequence<T>* sequence;
+    int index;
+
+public:
+    explicit SequenceEnumerator(const Sequence<T>* seq) : sequence(seq), index(-1) {}
+
+    bool MoveNext() override;
+    const T& GetCurrent() const override;
+    void Reset() override;
+};
+
+template<class T>
+class Sequence : public IEnumerable<T> {
+protected:
+    virtual Sequence<T>* CreateAccumulator() const {
+        return CreateEmpty();
+    }
+
+    virtual Sequence<T>* CreateAccumulator(int expectedLength) const {
+        (void)expectedLength;
+        return CreateAccumulator();
+    }
+
+    virtual Sequence<T>* FinalizeAccumulator(Sequence<T>* accumulator) const {
+        return accumulator;
+    }
+
+public:
+    virtual ~Sequence() = default;
+
+    virtual const T& Get(int index) const = 0;
+    virtual int GetLength() const = 0;
+    virtual const T& GetFirst() const = 0;
+    virtual const T& GetLast() const = 0;
+
+    virtual Sequence<T>* Append(const T& item) = 0;
+    virtual Sequence<T>* Prepend(const T& item) = 0;
+    virtual Sequence<T>* InsertAt(const T& item, int index) = 0;
+    virtual Sequence<T>* Concat(const Sequence<T>* other) = 0;
+    virtual Sequence<T>* GetSubsequence(int start, int end) const = 0;
+    virtual Sequence<T>* CreateEmpty() const = 0;
+    virtual Sequence<T>* CreateFromArray(const T* items, int count) const = 0;
+
+    IEnumerator<T>* GetEnumerator() const override;
+
+    template<typename Func>
+    Sequence<T>* Map(Func f) const {
+        Sequence<T>* result = CreateAccumulator(GetLength());
+        IEnumerator<T>* enumerator = GetEnumerator();
+        while (enumerator->MoveNext()) {
+            Sequence<T>* updated = result->Append(f(enumerator->GetCurrent()));
+            if (updated != result) {
+                delete result;
+            }
+            result = updated;
+        }
+        delete enumerator;
+        return FinalizeAccumulator(result);
+    }
+
+    template<typename Func>
+    Sequence<T>* FlatMap(Func f) const {
+        Sequence<T>* result = CreateAccumulator(GetLength());
+        IEnumerator<T>* enumerator = GetEnumerator();
+        while (enumerator->MoveNext()) {
+            Sequence<T>* expanded = f(enumerator->GetCurrent());
+            Sequence<T>* updated = result->Concat(expanded);
+            if (updated != result) {
+                delete result;
+            }
+            result = updated;
+            delete expanded;
+        }
+        delete enumerator;
+        return FinalizeAccumulator(result);
+    }
+
+    template<typename Func, typename U>
+    U Reduce(Func f, U initial) const {
+        U result = initial;
+        IEnumerator<T>* enumerator = GetEnumerator();
+        while (enumerator->MoveNext()) {
+            result = f(enumerator->GetCurrent(), result);
+        }
+        delete enumerator;
+        return result;
+    }
+
+    template<typename Predicate>
+    Sequence<T>* Where(Predicate pred) const {
+        Sequence<T>* result = CreateAccumulator(GetLength());
+        IEnumerator<T>* enumerator = GetEnumerator();
+        while (enumerator->MoveNext()) {
+            const T& item = enumerator->GetCurrent();
+            if (pred(item)) {
+                Sequence<T>* updated = result->Append(item);
+                if (updated != result) {
+                    delete result;
+                }
+                result = updated;
+            }
+        }
+        delete enumerator;
+        return FinalizeAccumulator(result);
+    }
+
+    template<typename Predicate>
+    T Find(Predicate pred) const {
+        IEnumerator<T>* enumerator = GetEnumerator();
+        while (enumerator->MoveNext()) {
+            const T& item = enumerator->GetCurrent();
+            if (pred(item)) {
+                delete enumerator;
+                return item;
+            }
+        }
+        delete enumerator;
+        throw ElementNotFound();
+    }
+
+    template<typename U>
+    Sequence<Tuple<T, U>>* Zip(const Sequence<U>* other) const {
+        if (other == nullptr) {
+            throw InvalidArgument("other sequence must not be null");
+        }
+
+        int leftLength = GetLength();
+        int rightLength = other->GetLength();
+        int resultLength = leftLength < rightLength ? leftLength : rightLength;
+        auto* result = new ArraySequence<Tuple<T, U>>(resultLength);
+        IEnumerator<T>* left = GetEnumerator();
+        IEnumerator<U>* right = other->GetEnumerator();
+
+        while (left->MoveNext() && right->MoveNext()) {
+            result->Append(Tuple<T, U>(left->GetCurrent(), right->GetCurrent()));
+        }
+
+        delete left;
+        delete right;
+        return result;
+    }
+
+    template<
+        typename TupleType = T,
+        typename First = typename TupleTraits<TupleType>::FirstType,
+        typename Second = typename TupleTraits<TupleType>::SecondType
+    >
+    SequencePair<First, Second> Unzip() const {
+        int length = GetLength();
+        auto* first = new ArraySequence<First>(length);
+        auto* second = new ArraySequence<Second>(length);
+
+        IEnumerator<T>* enumerator = GetEnumerator();
+        while (enumerator->MoveNext()) {
+            const TupleType& item = enumerator->GetCurrent();
+            first->Append(item.first);
+            second->Append(item.second);
+        }
+        delete enumerator;
+
+        return {first, second};
+    }
+
+    template<typename Predicate>
+    Sequence<Sequence<T>*>* Split(Predicate pred) const {
+        int length = GetLength();
+        auto* result = new ArraySequence<Sequence<T>*>(length + 1);
+        Sequence<T>* current = CreateAccumulator(length);
+        IEnumerator<T>* enumerator = GetEnumerator();
+
+        while (enumerator->MoveNext()) {
+            const T& item = enumerator->GetCurrent();
+            if (pred(item)) {
+                if (current->GetLength() > 0) {
+                    result->Append(FinalizeAccumulator(current));
+                    current = CreateAccumulator(length);
+                }
+            } else {
+                Sequence<T>* updated = current->Append(item);
+                if (updated != current) {
+                    delete current;
+                }
+                current = updated;
+            }
+        }
+        delete enumerator;
+
+        if (current->GetLength() > 0) {
+            result->Append(FinalizeAccumulator(current));
+        } else {
+            delete current;
+        }
+
+        return result;
+    }
+
+    Sequence<T>* Slice(int index, int count, const Sequence<T>* replacement = nullptr) const {
+        if (count < 0) {
+            throw InvalidArgument("count must be non-negative");
+        }
+
+        int length = GetLength();
+        int actualIndex = index;
+        if (actualIndex < 0) {
+            actualIndex = length + actualIndex;
+        }
+
+        if (actualIndex < 0 || actualIndex > length) {
+            throw IndexOutOfRange(index, length);
+        }
+
+        int skipUntil = actualIndex + count;
+        if (skipUntil < actualIndex) {
+            skipUntil = length;
+        }
+        if (skipUntil > length) {
+            skipUntil = length;
+        }
+
+        int replacementLength = replacement == nullptr ? 0 : replacement->GetLength();
+        int removedLength = skipUntil - actualIndex;
+        Sequence<T>* result = CreateAccumulator(length - removedLength + replacementLength);
+        IEnumerator<T>* source = GetEnumerator();
+        int currentIndex = 0;
+        bool replacementInserted = false;
+
+        while (source->MoveNext()) {
+            if (!replacementInserted && currentIndex == actualIndex && replacement != nullptr) {
+                IEnumerator<T>* replacementEnumerator = replacement->GetEnumerator();
+                while (replacementEnumerator->MoveNext()) {
+                    Sequence<T>* updated = result->Append(replacementEnumerator->GetCurrent());
+                    if (updated != result) {
+                        delete result;
+                    }
+                    result = updated;
+                }
+                delete replacementEnumerator;
+                replacementInserted = true;
+            }
+
+            const T& item = source->GetCurrent();
+            if (currentIndex < actualIndex || currentIndex >= skipUntil) {
+                Sequence<T>* updated = result->Append(item);
+                if (updated != result) {
+                    delete result;
+                }
+                result = updated;
+            }
+            currentIndex++;
+        }
+        delete source;
+
+        if (!replacementInserted && replacement != nullptr) {
+            IEnumerator<T>* replacementEnumerator = replacement->GetEnumerator();
+            while (replacementEnumerator->MoveNext()) {
+                Sequence<T>* updated = result->Append(replacementEnumerator->GetCurrent());
+                if (updated != result) {
+                    delete result;
+                }
+                result = updated;
+            }
+            delete replacementEnumerator;
+        }
+
+        return FinalizeAccumulator(result);
+    }
+
+    Option<T> TryGet(int index) const {
+        if (index < 0 || index >= GetLength()) {
+            return Option<T>::None();
+        }
+        return Option<T>::Some(Get(index));
+    }
+
+    template<typename Predicate>
+    Option<T> TryFind(Predicate pred) const {
+        IEnumerator<T>* enumerator = GetEnumerator();
+        while (enumerator->MoveNext()) {
+            const T& item = enumerator->GetCurrent();
+            if (pred(item)) {
+                delete enumerator;
+                return Option<T>::Some(item);
+            }
+        }
+        delete enumerator;
+        return Option<T>::None();
+    }
+
+    Option<T> TryFirst() const {
+        if (GetLength() == 0) {
+            return Option<T>::None();
+        }
+        return Option<T>::Some(GetFirst());
+    }
+
+    Option<T> TryLast() const {
+        if (GetLength() == 0) {
+            return Option<T>::None();
+        }
+        return Option<T>::Some(GetLast());
+    }
+
+    const T& operator[](int index) const {
+        return Get(index);
+    }
+
+    static Sequence<T>* From(const T* arr, int count) {
+        ArraySequence<T> factory;
+        return factory.CreateFromArray(arr, count);
+    }
+};
+
+template<class T, class Derived>
+class SequenceCRTP : public Sequence<T> {
+private:
+    Derived* Self() {
+        return static_cast<Derived*>(this);
+    }
+
+public:
+    Sequence<T>* Append(const T& item) override {
+        Derived* result = Self()->Instance(this->GetLength() + 1);
+        result->AppendInternal(item);
+        return result;
+    }
+
+    Sequence<T>* Prepend(const T& item) override {
+        Derived* result = Self()->Instance(this->GetLength() + 1);
+        result->PrependInternal(item);
+        return result;
+    }
+
+    Sequence<T>* InsertAt(const T& item, int index) override {
+        Derived* result = Self()->Instance(this->GetLength() + 1);
+        result->InsertAtInternal(item, index);
+        return result;
+    }
+
+    Sequence<T>* Concat(const Sequence<T>* other) override {
+        if (other == nullptr) {
+            throw InvalidArgument("other sequence must not be null");
+        }
+        Derived* result = Self()->Instance(this->GetLength() + other->GetLength());
+        result->ConcatInternal(other);
+        return result;
+    }
+};
+
+template<class T>
+bool SequenceEnumerator<T>::MoveNext() {
+    if (index + 1 >= sequence->GetLength()) {
+        return false;
+    }
+    index++;
+    return true;
+}
+
+template<class T>
+const T& SequenceEnumerator<T>::GetCurrent() const {
+    if (index < 0 || index >= sequence->GetLength()) {
+        throw IndexOutOfRange(index, sequence->GetLength());
+    }
+    return sequence->Get(index);
+}
+
+template<class T>
+void SequenceEnumerator<T>::Reset() {
+    index = -1;
+}
+
+template<class T>
+IEnumerator<T>* Sequence<T>::GetEnumerator() const {
+    return new SequenceEnumerator<T>(this);
+}
+
+
+===== ./src/main.cpp =====
+
+#include <iostream>
+#include <limits>
+#include <random>
+#include <string>
+#include "../include/DynamicArray.hpp"
+#include "../include/Exceptions.hpp"
+#include "../include/Immutable/ImmutableSegmentedDeque.hpp"
+#include "../include/Mutable/MutableSegmentedDeque.hpp"
+
+extern int RunAllTests();
+
+namespace {
+
+using IntDeque = SegmentedDeque<int>;
+using MutableIntDeque = MutableSegmentedDeque<int>;
+using ImmutableIntDeque = ImmutableSegmentedDeque<int>;
+using IntValues = DynamicArray<int>;
+
+constexpr const char* kMenu = R"(
+╔══════════════════════════════════════════════════════════════╗
+║        ЛАБОРАТОРНАЯ РАБОТА №3 - SEGMENTED DEQUE             ║
+╠══════════════════════════════════════════════════════════════╣
+║  СОЗДАНИЕ И ЗАГРУЗКА                                        ║
+║   1. Создать дек вручную                                    ║
+║      Ввести тип, размер сегмента и все элементы             ║
+║   2. Сгенерировать случайный дек                            ║
+║      Заполнить дек случайными числами по диапазону          ║
+╠══════════════════════════════════════════════════════════════╣
+║  БАЗОВЫЕ ОПЕРАЦИИ                                           ║
+║   3. PushFront                                              ║
+║      Добавить элемент в начало дека                         ║
+║   4. PushBack                                               ║
+║      Добавить элемент в конец дека                          ║
+║   5. PopFront                                               ║
+║      Удалить первый элемент                                 ║
+║   6. PopBack                                                ║
+║      Удалить последний элемент                              ║
+║   7. Показать дек                                           ║
+║      Вывести элементы, тип и краткую сводку                 ║
+║   8. Показать segmented-buffer layout                       ║
+║      Показать сегменты и степень их заполнения              ║
+╠══════════════════════════════════════════════════════════════╣
+║  ОПЕРАЦИИ НАД КОЛЛЕКЦИЕЙ                                    ║
+║   9. Concat с другим деком                                  ║
+║      Приписать второй дек в конец текущего                  ║
+║   10. Извлечь поддек                                        ║
+║      Оставить элементы из диапазона [start, end]            ║
+║   11. Найти подпоследовательность                           ║
+║      Найти индекс первого вхождения шаблона                 ║
+║   12. Map (x * 2)                                           ║
+║      Умножить каждый элемент на 2                           ║
+║   13. Where (только чётные)                                 ║
+║      Оставить только чётные элементы                        ║
+║   14. Reduce (сумма)                                        ║
+║      Вычислить сумму всех элементов                         ║
+║   15. Sort                                                  ║
+║      Отсортировать дек по возрастанию                       ║
+║   16. MergeSorted с другим отсортированным деком            ║
+║      Слить два отсортированных дека                         ║
+╠══════════════════════════════════════════════════════════════╣
+║  ПРОВЕРКА                                                   ║
+║   17. Запустить модульные тесты                             ║
+║      Проверить корректность реализации                      ║
+╠══════════════════════════════════════════════════════════════╣
+║   0. Выход                                                  ║
+║      Завершить работу программы                             ║
+╚══════════════════════════════════════════════════════════════╝
+)";
+
+template<class T>
+T ReadNumber(const std::string& prompt) {
+    T value{};
+    std::cout << prompt;
+    std::cin >> value;
+    return value;
+}
+
+void ShowMenu() {
+    std::cout << kMenu << "> ";
+}
+
+void RequireDeque(IntDeque* deque) {
+    if (deque == nullptr) {
+        throw InvalidState("сначала создайте дек");
+    }
+}
+
+bool IsImmutable(const IntDeque* deque) {
+    return dynamic_cast<const ImmutableIntDeque*>(deque) != nullptr;
+}
+
+void ReplaceDeque(IntDeque*& current, IntDeque* updated) {
+    if (updated != current) {
+        delete current;
+        current = updated;
+    }
+}
+
+void PrintDeque(const std::string& label, const IntDeque& deque) {
+    std::cout << "\n" << label << ": [";
+    for (int i = 0; i < deque.GetLength(); i++) {
+        if (i > 0) {
+            std::cout << ", ";
+        }
+        std::cout << deque.Get(i);
+    }
+    std::cout << "]" << std::endl;
+}
+
+void PrintSummary(const IntDeque& deque) {
+    std::cout << "Тип: " << (IsImmutable(&deque) ? "ImmutableSegmentedDeque" : "MutableSegmentedDeque") << std::endl;
+    std::cout << "Хранилище блоков: " << DequeStorageKindToString(deque.GetStorageKind()) << std::endl;
+    std::cout << "Длина: " << deque.GetLength() << std::endl;
+    std::cout << "Layout: " << deque.DescribeLayout() << std::endl;
+}
+
+void PrintState(const std::string& label, const IntDeque& deque) {
+    PrintDeque(label, deque);
+    PrintSummary(deque);
+}
+
+DequeStorageKind ReadStorageKind() {
+    return ReadNumber<int>("Выберите хранилище блоков (1 - ArraySequence, 2 - ListSequence): ") == 2
+        ? DequeStorageKind::ListSequence
+        : DequeStorageKind::ArraySequence;
+}
+
+bool ReadImmutableFlag() {
+    return ReadNumber<int>("Выберите тип дека (1 - mutable, 2 - immutable): ") == 2;
+}
+
+IntValues ReadValues() {
+    int count = ReadNumber<int>("Количество элементов: ");
+    if (count < 0) {
+        throw InvalidArgument("количество элементов должно быть неотрицательным");
+    }
+
+    IntValues values;
+    values.Reserve(count);
+    for (int i = 0; i < count; i++) {
+        values.Append(ReadNumber<int>("Элемент [" + std::to_string(i) + "]: "));
+    }
+    return values;
+}
+
+IntValues GenerateRandomValues(int count, int minValue, int maxValue, unsigned int seed) {
+    if (count < 0) {
+        throw InvalidArgument("количество элементов должно быть неотрицательным");
+    }
+    if (minValue > maxValue) {
+        throw InvalidArgument("минимальное значение не может быть больше максимального");
+    }
+
+    std::mt19937 generator(seed);
+    std::uniform_int_distribution<int> distribution(minValue, maxValue);
+
+    IntValues values;
+    values.Reserve(count);
+    for (int i = 0; i < count; i++) {
+        values.Append(distribution(generator));
+    }
+    return values;
+}
+
+IntDeque* BuildDeque(
+    bool immutable,
+    int blockCapacity,
+    DequeStorageKind storageKind,
+    const IntValues& values
+) {
+    if (immutable) {
+        return new ImmutableIntDeque(
+            values.RawData(),
+            values.GetSize(),
+            blockCapacity,
+            storageKind
+        );
+    }
+
+    return new MutableIntDeque(
+        values.RawData(),
+        values.GetSize(),
+        blockCapacity,
+        storageKind
+    );
+}
+
+MutableIntDeque BuildHelperDeque(const IntDeque& reference, const IntValues& values) {
+    return MutableIntDeque(
+        values.RawData(),
+        values.GetSize(),
+        reference.GetBlockCapacity(),
+        reference.GetStorageKind()
+    );
+}
+
+void ReplaceWithNewDeque(
+    IntDeque*& current,
+    bool immutable,
+    int blockCapacity,
+    DequeStorageKind storageKind,
+    const IntValues& values,
+    const std::string& label
+) {
+    delete current;
+    current = BuildDeque(immutable, blockCapacity, storageKind, values);
+    PrintState(label, *current);
+}
+
+void CreateManualDeque(IntDeque*& current) {
+    bool immutable = ReadImmutableFlag();
+    DequeStorageKind storageKind = ReadStorageKind();
+    int blockCapacity = ReadNumber<int>("Размер одного сегмента: ");
+    ReplaceWithNewDeque(
+        current,
+        immutable,
+        blockCapacity,
+        storageKind,
+        ReadValues(),
+        "Созданный дек"
+    );
+}
+
+void CreateRandomDeque(IntDeque*& current) {
+    bool immutable = ReadImmutableFlag();
+    DequeStorageKind storageKind = ReadStorageKind();
+    int blockCapacity = ReadNumber<int>("Размер одного сегмента: ");
+    int count = ReadNumber<int>("Количество элементов: ");
+    int minValue = ReadNumber<int>("Минимальное значение: ");
+    int maxValue = ReadNumber<int>("Максимальное значение: ");
+    unsigned int seed = ReadNumber<unsigned int>("Seed генератора: ");
+
+    ReplaceWithNewDeque(
+        current,
+        immutable,
+        blockCapacity,
+        storageKind,
+        GenerateRandomValues(count, minValue, maxValue, seed),
+        "Случайно сгенерированный дек"
+    );
+}
+
+MutableIntDeque ReadPeerDeque(const IntDeque& current, const std::string& title) {
+    std::cout << title << std::endl;
+    return BuildHelperDeque(current, ReadValues());
+}
+
+template<class Operation>
+void ApplyAndShow(IntDeque*& current, const std::string& label, Operation operation) {
+    RequireDeque(current);
+    ReplaceDeque(current, operation(*current));
+    PrintDeque(label, *current);
+}
+
+}  
+
+int main() {
+    setlocale(LC_ALL, "Russian");
+
+    IntDeque* current = nullptr;
+
+    std::cout << "\nЛабораторная работа №3 - дек с сегментированным буфером" << std::endl;
+    std::cout << "==========================================================" << std::endl;
+
+    while (true) {
+        ShowMenu();
+        int choice = 0;
+        std::cin >> choice;
+
+        try {
+            switch (choice) {
+                case 1:
+                    CreateManualDeque(current);
+                    break;
+                case 2:
+                    CreateRandomDeque(current);
+                    break;
+                case 3:
+                    ApplyAndShow(current, "После PushFront", [&](IntDeque& deque) {
+                        return deque.PushFront(ReadNumber<int>("Введите значение: "));
+                    });
+                    break;
+                case 4:
+                    ApplyAndShow(current, "После PushBack", [&](IntDeque& deque) {
+                        return deque.PushBack(ReadNumber<int>("Введите значение: "));
+                    });
+                    break;
+                case 5: {
+                    RequireDeque(current);
+                    int removed = current->Front();
+                    ReplaceDeque(current, current->PopFront());
+                    std::cout << "Удалён элемент с начала: " << removed << std::endl;
+                    PrintDeque("После PopFront", *current);
+                    break;
+                }
+                case 6: {
+                    RequireDeque(current);
+                    int removed = current->Back();
+                    ReplaceDeque(current, current->PopBack());
+                    std::cout << "Удалён элемент с конца: " << removed << std::endl;
+                    PrintDeque("После PopBack", *current);
+                    break;
+                }
+                case 7:
+                    RequireDeque(current);
+                    PrintState("Текущий дек", *current);
+                    break;
+                case 8:
+                    RequireDeque(current);
+                    std::cout << "\n" << current->DescribeLayout() << std::endl;
+                    break;
+                case 9: {
+                    RequireDeque(current);
+                    MutableIntDeque other = ReadPeerDeque(*current, "Введите элементы второго дека");
+                    ApplyAndShow(current, "После Concat", [&](IntDeque& deque) {
+                        return deque.Concat(other);
+                    });
+                    break;
+                }
+                case 10: {
+                    int start = ReadNumber<int>("Начальный индекс: ");
+                    int end = ReadNumber<int>("Конечный индекс: ");
+                    ApplyAndShow(current, "Извлечённый поддек", [&](IntDeque& deque) {
+                        return deque.GetSubDeque(start, end);
+                    });
+                    break;
+                }
+                case 11: {
+                    RequireDeque(current);
+                    MutableIntDeque pattern = ReadPeerDeque(*current, "Введите элементы шаблона для поиска");
+                    int index = current->FindSubDeque(pattern);
+                    std::cout << (index >= 0
+                        ? "Подпоследовательность найдена с индекса " + std::to_string(index)
+                        : "Подпоследовательность не найдена")
+                              << std::endl;
+                    break;
+                }
+                case 12:
+                    ApplyAndShow(current, "После Map(x * 2)", [](IntDeque& deque) {
+                        return deque.Map([](const int& value) { return value * 2; });
+                    });
+                    break;
+                case 13:
+                    ApplyAndShow(current, "После Where(even)", [](IntDeque& deque) {
+                        return deque.Where([](const int& value) { return value % 2 == 0; });
+                    });
+                    break;
+                case 14:
+                    RequireDeque(current);
+                    std::cout << "Сумма элементов = "
+                              << current->Reduce([](const int& value, const int& acc) { return value + acc; }, 0)
+                              << std::endl;
+                    break;
+                case 15:
+                    ApplyAndShow(current, "После Sort", [](IntDeque& deque) {
+                        return deque.Sorted();
+                    });
+                    break;
+                case 16: {
+                    RequireDeque(current);
+                    MutableIntDeque other = ReadPeerDeque(
+                        *current,
+                        "Введите второй дек, элементы должны быть отсортированы"
+                    );
+                    ApplyAndShow(current, "После MergeSorted", [&](IntDeque& deque) {
+                        return deque.MergeSorted(other);
+                    });
+                    break;
+                }
+                case 17:
+                    RunAllTests();
+                    break;
+                case 0:
+                    delete current;
+                    std::cout << "\nВыход из программы..." << std::endl;
+                    return 0;
+                default:
+                    std::cout << "Неизвестный пункт меню" << std::endl;
+                    break;
+            }
+        } catch (const std::exception& error) {
+            std::cout << "Ошибка: " << error.what() << std::endl;
+            std::cin.clear();
+            std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+        }
+    }
+}
+
+
+===== ./src/tests.cpp =====
+
+#include <iomanip>
+#include <iostream>
+#include <sstream>
+#include <string>
+#include "../include/DynamicArray.hpp"
+#include "../include/Immutable/ImmutableSegmentedDeque.hpp"
+#include "../include/InversionAlgorithms.hpp"
+#include "../include/Mutable/MutableSegmentedDeque.hpp"
+
+#define COLOR_RESET   "\033[0m"
+#define COLOR_GREEN   "\033[32m"
+#define COLOR_RED     "\033[31m"
+#define COLOR_YELLOW  "\033[33m"
+#define COLOR_BLUE    "\033[34m"
+#define COLOR_CYAN    "\033[36m"
+#define COLOR_BOLD    "\033[1m"
+
+struct TestResult {
+    std::string name;
+    bool passed;
+    int assertions;
+    int passedAssertions;
+};
+
+static DynamicArray<TestResult> allResults;
+static int totalAssertions = 0;
+static int totalPassed = 0;
+static bool currentTestPassed = false;
+static int currentTestAssertions = 0;
+
+#define TEST(name) void name()
+
+#define ASSERT_EQ(expected, actual, msg) do { \
+    totalAssertions++; \
+    currentTestAssertions++; \
+    auto expectedValue = (expected); \
+    auto actualValue = (actual); \
+    if (expectedValue == actualValue) { \
+        totalPassed++; \
+        std::cout << COLOR_GREEN "  OK  " COLOR_RESET << msg << std::endl; \
+        std::cout << "    Ожидалось: " << expectedValue << ", Получено: " << actualValue << std::endl; \
+    } else { \
+        std::cout << COLOR_RED "  FAIL" COLOR_RESET << " " << msg << std::endl; \
+        std::cout << "    " COLOR_YELLOW "Ожидалось: " COLOR_RESET << expectedValue << std::endl; \
+        std::cout << "    " COLOR_RED "Получено: " COLOR_RESET << actualValue << std::endl; \
+        currentTestPassed = false; \
+    } \
+} while (0)
+
+#define ASSERT_TRUE(condition, msg) do { \
+    totalAssertions++; \
+    currentTestAssertions++; \
+    if (condition) { \
+        totalPassed++; \
+        std::cout << COLOR_GREEN "  OK  " COLOR_RESET << msg << std::endl; \
+    } else { \
+        std::cout << COLOR_RED "  FAIL" COLOR_RESET << " " << msg << std::endl; \
+        currentTestPassed = false; \
+    } \
+} while (0)
+
+#define ASSERT_THROWS(expr, exc, msg) do { \
+    totalAssertions++; \
+    currentTestAssertions++; \
+    bool caught = false; \
+    try { \
+        expr; \
+    } catch (const exc&) { \
+        caught = true; \
+    } catch (...) { \
+        caught = false; \
+    } \
+    if (caught) { \
+        totalPassed++; \
+        std::cout << COLOR_GREEN "  OK  " COLOR_RESET << msg << std::endl; \
+    } else { \
+        std::cout << COLOR_RED "  FAIL" COLOR_RESET << " " << msg << std::endl; \
+        std::cout << "    Ожидалось исключение " << #exc << std::endl; \
+        currentTestPassed = false; \
+    } \
+} while (0)
+
+#define RUN_TEST(name) do { \
+    std::cout << COLOR_BOLD COLOR_CYAN "\n════════════════════════════════════════" COLOR_RESET << std::endl; \
+    std::cout << COLOR_BOLD COLOR_BLUE " ТЕСТ: " COLOR_RESET << #name << std::endl; \
+    std::cout << COLOR_CYAN "════════════════════════════════════════" COLOR_RESET << std::endl; \
+    currentTestPassed = true; \
+    currentTestAssertions = 0; \
+    try { \
+        name(); \
+    } catch (const std::exception& e) { \
+        std::cout << COLOR_RED "  FAIL" COLOR_RESET << " Непредвиденное исключение: " << e.what() << std::endl; \
+        currentTestPassed = false; \
+    } \
+    allResults.Append({#name, currentTestPassed, currentTestAssertions, currentTestPassed ? currentTestAssertions : 0}); \
+    std::cout << COLOR_BOLD "\n Результат: " COLOR_RESET; \
+    if (currentTestPassed) { \
+        std::cout << COLOR_GREEN "ПРОЙДЕН" COLOR_RESET << std::endl; \
+    } else { \
+        std::cout << COLOR_RED "ПРОВАЛЕН" COLOR_RESET << std::endl; \
+    } \
+} while (0)
+
+namespace {
+
+template<class T>
+std::string DequeToString(const SegmentedDeque<T>& deque) {
+    std::string result = "[";
+    for (int i = 0; i < deque.GetLength(); i++) {
+        std::ostringstream stream;
+        stream << deque.Get(i);
+        result += stream.str();
+        if (i + 1 < deque.GetLength()) {
+            result += ", ";
+        }
+    }
+    result += "]";
+    return result;
+}
+
+void PrintSubHeader(const std::string& text) {
+    std::cout << COLOR_CYAN "\n  -- " COLOR_RESET << text << COLOR_CYAN " --" COLOR_RESET << std::endl;
+}
+
+}  
+
+TEST(TestMutableDequePushAndAccess) {
+    PrintSubHeader("PushBack и доступ по индексу");
+    MutableSegmentedDeque<int> deque(3, DequeStorageKind::ArraySequence);
+
+    for (int value = 1; value <= 7; value++) {
+        deque.PushBack(value);
+    }
+
+    ASSERT_EQ(7, deque.GetLength(), "Длина после 7 вставок");
+    ASSERT_EQ(1, deque.Front(), "Первый элемент");
+    ASSERT_EQ(7, deque.Back(), "Последний элемент");
+    ASSERT_EQ(4, deque.Get(3), "Элемент в середине");
+    ASSERT_EQ(3, deque.GetSegmentCount(), "Количество сегментов");
+}
+
+TEST(TestPushFrontAndPopAcrossSegments) {
+    PrintSubHeader("PushFront, PopFront и PopBack");
+    MutableSegmentedDeque<int> deque(4, DequeStorageKind::ArraySequence);
+
+    for (int value = 1; value <= 6; value++) {
+        deque.PushFront(value);
+    }
+
+    ASSERT_EQ("[6, 5, 4, 3, 2, 1]", DequeToString(deque), "Порядок после PushFront");
+
+    deque.PopFront();
+    deque.PopFront();
+    deque.PopBack();
+
+    ASSERT_EQ("[4, 3, 2]", DequeToString(deque), "Порядок после удалений");
+    ASSERT_EQ(3, deque.GetLength(), "Размер после удалений");
+}
+
+TEST(TestListStorageVariant) {
+    PrintSubHeader("Вариант на ListSequence");
+    MutableSegmentedDeque<std::string> deque(2, DequeStorageKind::ListSequence);
+
+    deque.PushBack("b");
+    deque.PushBack("c");
+    deque.PushFront("a");
+
+    ASSERT_EQ(DequeStorageKind::ListSequence, deque.GetStorageKind(), "Используется ListSequence");
+    ASSERT_EQ(std::string("a"), deque.Front(), "Первый строковый элемент");
+    ASSERT_EQ(std::string("c"), deque.Back(), "Последний строковый элемент");
+    ASSERT_EQ(3, deque.GetLength(), "Корректная длина");
+}
+
+TEST(TestImmutableSemantics) {
+    PrintSubHeader("Неизменяемая версия");
+    int values[] = {1, 2, 3};
+    ImmutableSegmentedDeque<int> original(values, 3, 3, DequeStorageKind::ArraySequence);
+
+    SegmentedDeque<int>* appended = original.PushBack(4);
+    ASSERT_EQ(3, original.GetLength(), "Оригинал не меняется");
+    ASSERT_EQ(4, appended->GetLength(), "Новая версия увеличена");
+    ASSERT_EQ("[1, 2, 3]", DequeToString(original), "Содержимое оригинала сохранено");
+    ASSERT_EQ("[1, 2, 3, 4]", DequeToString(*appended), "Содержимое новой версии корректно");
+
+    delete appended;
+}
+
+TEST(TestConcatSubDequeAndSearch) {
+    PrintSubHeader("Concat, поддек и поиск подпоследовательности");
+    int leftValues[] = {1, 2, 3};
+    int rightValues[] = {4, 5, 6};
+    MutableSegmentedDeque<int> left(leftValues, 3, 3, DequeStorageKind::ArraySequence);
+    MutableSegmentedDeque<int> right(rightValues, 3, 3, DequeStorageKind::ArraySequence);
+
+    SegmentedDeque<int>* joined = left.Concat(right);
+    SegmentedDeque<int>* middle = joined->GetSubDeque(1, 3);
+    int patternValues[] = {3, 4};
+    MutableSegmentedDeque<int> pattern(patternValues, 2, 3, DequeStorageKind::ArraySequence);
+
+    ASSERT_EQ("[1, 2, 3, 4, 5, 6]", DequeToString(*joined), "Concat работает корректно");
+    ASSERT_EQ("[2, 3, 4]", DequeToString(*middle), "Поддек извлечён корректно");
+    ASSERT_EQ(2, joined->FindSubDeque(pattern), "Подпоследовательность найдена");
+    ASSERT_TRUE(joined->ContainsSubDeque(pattern), "ContainsSubDeque возвращает true");
+
+    delete joined;
+    delete middle;
+}
+
+TEST(TestMapWhereReduceSortMerge) {
+    PrintSubHeader("Map, Where, Reduce, Sorted, MergeSorted");
+    int values[] = {3, 1, 4, 2};
+    MutableSegmentedDeque<int> deque(values, 4, 3, DequeStorageKind::ArraySequence);
+
+    SegmentedDeque<int>* mapped = deque.Map([](const int& value) { return value * 2; });
+    SegmentedDeque<int>* filtered = deque.Where([](const int& value) { return value % 2 == 0; });
+    SegmentedDeque<int>* sorted = deque.Sorted();
+
+    int otherValues[] = {0, 5};
+    MutableSegmentedDeque<int> other(otherValues, 2, 3, DequeStorageKind::ArraySequence);
+    SegmentedDeque<int>* merged = sorted->MergeSorted(other);
+
+    ASSERT_EQ("[6, 2, 8, 4]", DequeToString(*mapped), "Map удваивает элементы");
+    ASSERT_EQ("[4, 2]", DequeToString(*filtered), "Where фильтрует чётные");
+    ASSERT_EQ(10, deque.Reduce([](const int& value, const int& acc) { return value + acc; }, 0), "Reduce суммирует");
+    ASSERT_EQ("[1, 2, 3, 4]", DequeToString(*sorted), "Sorted сортирует по возрастанию");
+    ASSERT_EQ("[0, 1, 2, 3, 4, 5]", DequeToString(*merged), "MergeSorted сливает две отсортированные структуры");
+
+    delete mapped;
+    delete filtered;
+    delete sorted;
+    delete merged;
+}
+
+TEST(TestToSequenceAndLayout) {
+    PrintSubHeader("Преобразование в Sequence и описание layout");
+    int values[] = {1, 2, 3, 4, 5};
+    MutableSegmentedDeque<int> deque(values, 5, 3, DequeStorageKind::ArraySequence);
+
+    Sequence<int>* sequence = deque.ToSequence();
+    std::string layout = deque.DescribeLayout();
+
+    ASSERT_EQ(5, sequence->GetLength(), "ToSequence сохраняет длину");
+    ASSERT_EQ(1, sequence->Get(0), "ToSequence сохраняет первый элемент");
+    ASSERT_EQ(5, sequence->Get(4), "ToSequence сохраняет последний элемент");
+    ASSERT_TRUE(layout.find("segments=") != std::string::npos, "Layout содержит число сегментов");
+    ASSERT_TRUE(layout.find("fills=[") != std::string::npos, "Layout содержит заполнение сегментов");
+
+    delete sequence;
+}
+
+TEST(TestInversionAlgorithmsAgree) {
+    PrintSubHeader("Три алгоритма подсчёта инверсий");
+    int values[] = {2, 4, 1, 3, 5};
+    MutableSegmentedDeque<int> deque(values, 5, 3, DequeStorageKind::ArraySequence);
+
+    ASSERT_EQ(3LL, CountInversionsMapReduce(deque), "MapReduce-алгоритм");
+    ASSERT_EQ(3LL, CountInversionsMultiPass(deque), "Многопроходный алгоритм");
+    ASSERT_EQ(3LL, CountInversionsOnePass(deque), "Однопроходный алгоритм");
+}
+
+TEST(TestExceptions) {
+    PrintSubHeader("Граничные случаи и исключения");
+    MutableSegmentedDeque<int> empty(3, DequeStorageKind::ArraySequence);
+
+    ASSERT_THROWS(empty.Front(), EmptyCollection, "Front у пустого дека");
+    ASSERT_THROWS(empty.Back(), EmptyCollection, "Back у пустого дека");
+    ASSERT_THROWS(empty.PopFront(), EmptyCollection, "PopFront у пустого дека");
+    ASSERT_THROWS(empty.PopBack(), EmptyCollection, "PopBack у пустого дека");
+
+    empty.PushBack(10);
+    ASSERT_THROWS(empty.Get(1), IndexOutOfRange, "Get за пределами диапазона");
+}
+
+int RunAllTests() {
+    allResults.Resize(0);
+    totalAssertions = 0;
+    totalPassed = 0;
+
+    std::cout << COLOR_BOLD "\nЛабораторная работа №3 - модульные тесты" COLOR_RESET << std::endl;
+    std::cout << "=============================================================" << std::endl;
+
+    RUN_TEST(TestMutableDequePushAndAccess);
+    RUN_TEST(TestPushFrontAndPopAcrossSegments);
+    RUN_TEST(TestListStorageVariant);
+    RUN_TEST(TestImmutableSemantics);
+    RUN_TEST(TestConcatSubDequeAndSearch);
+    RUN_TEST(TestMapWhereReduceSortMerge);
+    RUN_TEST(TestToSequenceAndLayout);
+    RUN_TEST(TestInversionAlgorithmsAgree);
+    RUN_TEST(TestExceptions);
+
+    int passedTests = 0;
+    for (int i = 0; i < allResults.GetSize(); i++) {
+        if (allResults[i].passed) {
+            passedTests++;
+        }
+    }
+    int failedTests = allResults.GetSize() - passedTests;
+
+    std::cout << COLOR_BOLD COLOR_YELLOW "\n┌──────────────────────────── ИТОГИ ────────────────────────────┐" COLOR_RESET << std::endl;
+    std::cout << COLOR_BOLD COLOR_YELLOW "│" COLOR_RESET
+              << " Всего тестов: " << std::setw(2) << allResults.GetSize()
+              << "   Успешно: " << std::setw(2) << passedTests
+              << "   Провалено: " << std::setw(2) << failedTests
+              << std::setw(14) << " " << COLOR_BOLD COLOR_YELLOW "│" COLOR_RESET << std::endl;
+    std::cout << COLOR_BOLD COLOR_YELLOW "│" COLOR_RESET
+              << " Проверок: " << std::setw(3) << totalAssertions
+              << "   Успешно: " << std::setw(3) << totalPassed
+              << "   Точность: " << std::fixed << std::setprecision(1)
+              << (totalAssertions == 0 ? 0.0 : 100.0 * totalPassed / totalAssertions) << "%"
+              << std::setw(14) << " " << COLOR_BOLD COLOR_YELLOW "│" COLOR_RESET << std::endl;
+    std::cout << COLOR_BOLD COLOR_YELLOW "└───────────────────────────────────────────────────────────────┘" COLOR_RESET << std::endl;
+
+    return totalAssertions == totalPassed ? 0 : 1;
+}
+
+
+===== ./src/tests_main.cpp =====
+
+extern int RunAllTests();
+
+int main() {
+    return RunAllTests();
+}
+
+

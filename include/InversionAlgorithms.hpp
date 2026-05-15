@@ -4,25 +4,15 @@
 #include "Mutable/MutableListSequence.hpp"
 #include "Mutable/MutableSegmentedDeque.hpp"
 #include "SegmentedDeque.hpp"
-#include <chrono>
 #include <functional>
 #include <random>
-
-struct InversionBenchmarkResult {
-    long long mapReduceCount;
-    long long multiPassCount;
-    long long onePassCount;
-    double mapReduceMs;
-    double multiPassMs;
-    double onePassMs;
-};
 
 template<class T, class Compare = std::less<T>>
 long long CountInversionsMapReduce(const SegmentedDeque<T>& deque, Compare compare = Compare{}) {
     Sequence<T>* flat = deque.ToSequence();
-    Sequence<long long>* localCounts = MapIndexed(
+    Sequence<long long>* localCounts = MapIndexed<T, long long>(
         *flat,
-        [&](T value, int index) {
+        [&](const T& value, int index) {
             long long local = 0;
             for (int j = index + 1; j < flat->GetLength(); j++) {
                 if (compare(flat->Get(j), value)) {
@@ -84,31 +74,6 @@ long long CountInversionsOnePass(const SegmentedDeque<T>& deque, Compare compare
     }
 
     return total;
-}
-
-template<class T, class Compare = std::less<T>>
-InversionBenchmarkResult BenchmarkInversionAlgorithms(
-    const SegmentedDeque<T>& deque,
-    Compare compare = Compare{}
-) {
-    auto start = std::chrono::high_resolution_clock::now();
-    long long mapReduceCount = CountInversionsMapReduce(deque, compare);
-    auto afterMapReduce = std::chrono::high_resolution_clock::now();
-
-    long long multiPassCount = CountInversionsMultiPass(deque, compare);
-    auto afterMultiPass = std::chrono::high_resolution_clock::now();
-
-    long long onePassCount = CountInversionsOnePass(deque, compare);
-    auto afterOnePass = std::chrono::high_resolution_clock::now();
-
-    return {
-        mapReduceCount,
-        multiPassCount,
-        onePassCount,
-        std::chrono::duration<double, std::milli>(afterMapReduce - start).count(),
-        std::chrono::duration<double, std::milli>(afterMultiPass - afterMapReduce).count(),
-        std::chrono::duration<double, std::milli>(afterOnePass - afterMultiPass).count()
-    };
 }
 
 inline MutableSegmentedDeque<int>* GenerateRandomIntDeque(

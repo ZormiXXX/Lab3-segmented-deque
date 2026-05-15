@@ -3,12 +3,8 @@
 #include "../SegmentedDeque.hpp"
 
 template<class T>
-class MutableSegmentedDeque : public SegmentedDequeBase<T> {
+class MutableSegmentedDeque : public SegmentedDeque<T> {
 protected:
-    MutableSegmentedDeque<T>* Clone() const override {
-        return new MutableSegmentedDeque<T>(*this);
-    }
-
     MutableSegmentedDeque<T>* Instance() override {
         return this;
     }
@@ -22,7 +18,7 @@ public:
         int blockCapacityValue = 8,
         DequeStorageKind kind = DequeStorageKind::ArraySequence
     )
-        : SegmentedDequeBase<T>(blockCapacityValue, kind) {}
+        : SegmentedDeque<T>(blockCapacityValue, kind) {}
 
     MutableSegmentedDeque(
         const T* items,
@@ -30,8 +26,8 @@ public:
         int blockCapacityValue = 8,
         DequeStorageKind kind = DequeStorageKind::ArraySequence
     )
-        : SegmentedDequeBase<T>(items, count, blockCapacityValue, kind) {}
+        : SegmentedDeque<T>(items, count, blockCapacityValue, kind) {}
 
     MutableSegmentedDeque(const MutableSegmentedDeque<T>& other)
-        : SegmentedDequeBase<T>(other) {}
+        : SegmentedDeque<T>(other) {}
 };

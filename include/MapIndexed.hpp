@@ -2,9 +2,8 @@
 
 #include "Mutable/MutableArraySequence.hpp"
 #include "Sequence.hpp"
-#include <type_traits>
 
-template<class T, class Func, class U = std::invoke_result_t<Func, T, int>>
+template<class T, class U, class Func>
 Sequence<U>* MapIndexed(const Sequence<T>& sequence, Func mapper) {
     Sequence<U>* result = new MutableArraySequence<U>();
     for (int i = 0; i < sequence.GetLength(); i++) {
