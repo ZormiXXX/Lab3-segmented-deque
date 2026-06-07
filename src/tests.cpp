@@ -7,6 +7,11 @@
 #include "../include/InversionAlgorithms.hpp"
 #include "../include/Mutable/MutableSegmentedDeque.hpp"
 
+std::ostream& operator<<(std::ostream& stream, DequeStorageKind kind) {
+    stream << DequeStorageKindToString(kind);
+    return stream;
+}
+
 #define COLOR_RESET   "\033[0m"
 #define COLOR_GREEN   "\033[32m"
 #define COLOR_RED     "\033[31m"
@@ -105,15 +110,23 @@ namespace {
 
 template<class T>
 std::string DequeToString(const SegmentedDeque<T>& deque) {
+    Sequence<T>* sequence = deque.ToSequence();
+    IEnumerator<T>* enumerator = sequence->GetEnumerator();
     std::string result = "[";
-    for (int i = 0; i < deque.GetLength(); i++) {
+    bool first = true;
+
+    while (enumerator->MoveNext()) {
         std::ostringstream stream;
-        stream << deque.Get(i);
-        result += stream.str();
-        if (i + 1 < deque.GetLength()) {
+        stream << enumerator->GetCurrent();
+        if (!first) {
             result += ", ";
         }
+        result += stream.str();
+        first = false;
     }
+
+    delete enumerator;
+    delete sequence;
     result += "]";
     return result;
 }
@@ -131,7 +144,7 @@ TEST(TestMutableDequePushAndAccess) {
     for (int value = 1; value <= 7; value++) {
         deque.PushBack(value);
     }
-
+// првоерка что именно заполнен первый элемент
     ASSERT_EQ(7, deque.GetLength(), "Длина после 7 вставок");
     ASSERT_EQ(1, deque.Front(), "Первый элемент");
     ASSERT_EQ(7, deque.Back(), "Последний элемент");
@@ -152,7 +165,7 @@ TEST(TestPushFrontAndPopAcrossSegments) {
     deque.PopFront();
     deque.PopFront();
     deque.PopBack();
-
+// выводил пустый блоки
     ASSERT_EQ("[4, 3, 2]", DequeToString(deque), "Порядок после удалений");
     ASSERT_EQ(3, deque.GetLength(), "Размер после удалений");
 }
@@ -174,7 +187,7 @@ TEST(TestListStorageVariant) {
 TEST(TestImmutableSemantics) {
     PrintSubHeader("Неизменяемая версия");
     int values[] = {1, 2, 3};
-    ImmutableSegmentedDeque<int> original(values, 3, 3, DequeStorageKind::ArraySequence);
+    ImmutableSegmentedDeque<int> original(values, 3, 3, DequeStorageKind::ArraySequence); //const auto
 
     SegmentedDeque<int>* appended = original.PushBack(4);
     ASSERT_EQ(3, original.GetLength(), "Оригинал не меняется");
@@ -270,7 +283,7 @@ TEST(TestExceptions) {
     empty.PushBack(10);
     ASSERT_THROWS(empty.Get(1), IndexOutOfRange, "Get за пределами диапазона");
 }
-
+//Проверка на блоки с помощью Where, удаление попарно двух элементов из разных дек, проверка на целостность структуры после операций
 int RunAllTests() {
     allResults.Resize(0);
     totalAssertions = 0;

@@ -48,7 +48,6 @@ protected:
     static void AppendOwned(Sequence<U>*& sequence, const U& value);
 
     static void AppendDequeTo(SegmentedDeque<T>& target, const SegmentedDeque<T>& source);
-    static void AppendSequenceTo(SegmentedDeque<T>& target, const Sequence<T>& source);
 
     Sequence<Block*>* blocks;
     int blockCapacity;
@@ -59,7 +58,7 @@ protected:
     virtual SegmentedDeque<T>* CreateEmptySameKind() const = 0;
 
     template<class U>
-    Sequence<U>* CreateSequenceForKind() const;
+    Sequence<U>* CreateSequenceForKind() const; //CreateEmpty
 
     Sequence<Block*>* CreateBlockSequence(DequeStorageKind kind) const;
     void DestroyBlocks();
@@ -76,10 +75,29 @@ protected:
     template<class Visitor>
     void ForEachBlock(Visitor visitor) const;
 
-    SegmentedDeque<T>* BuildFromSequence(const Sequence<T>& source) const;
+    DynamicArray<T> CopyElementsToArray() const;
+    SegmentedDeque<T>* BuildFromArray(const DynamicArray<T>& values) const;
 
-    template<class Transformer>
-    SegmentedDeque<T>* BuildFromTransformedSequence(Transformer transform) const;
+    static DynamicArray<int> BuildPrefixTable(const DynamicArray<T>& pattern);
+
+    template<class Comparator>
+    static void MergeSortValues(
+        DynamicArray<T>& values,
+        DynamicArray<T>& buffer,
+        int left,
+        int right,
+        const Comparator& comparator
+    );
+
+    template<class Comparator>
+    static void MergeSortedRanges(
+        DynamicArray<T>& values,
+        DynamicArray<T>& buffer,
+        int left,
+        int mid,
+        int right,
+        const Comparator& comparator
+    );
 
     void PushBackDirect(const T& item);
     void PushFrontDirect(const T& item);
@@ -100,7 +118,7 @@ public:
     );
 
     SegmentedDeque(const SegmentedDeque<T>& other);
-    SegmentedDeque<T>& operator=(const SegmentedDeque<T>&) = delete;
+    SegmentedDeque<T>& operator=(const SegmentedDeque<T>&) = delete; //настройка оператора
     virtual ~SegmentedDeque();
 
     int GetLength() const;

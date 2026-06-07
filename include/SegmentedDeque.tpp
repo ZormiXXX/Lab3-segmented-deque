@@ -90,18 +90,9 @@ void SegmentedDeque<T>::AppendOwned(Sequence<U>*& sequence, const U& value) {
 
 template<class T>
 void SegmentedDeque<T>::AppendDequeTo(SegmentedDeque<T>& target, const SegmentedDeque<T>& source) {
-    for (int i = 0; i < source.GetLength(); i++) {
-        target.PushBackDirect(source.Get(i));
-    }
-}
-
-template<class T>
-void SegmentedDeque<T>::AppendSequenceTo(SegmentedDeque<T>& target, const Sequence<T>& source) {
-    IEnumerator<T>* enumerator = source.GetEnumerator();
-    while (enumerator->MoveNext()) {
-        target.PushBackDirect(enumerator->GetCurrent());
-    }
-    delete enumerator;
+    source.ForEachElement([&](const T& item) {
+        target.PushBackDirect(item);
+    });
 }
 
 template<class T>
@@ -126,9 +117,12 @@ void SegmentedDeque<T>::DestroyBlocks() {
     if (blocks == nullptr) {
         return;
     }
-    for (int i = 0; i < blocks->GetLength(); i++) {
-        delete blocks->Get(i);
+
+    IEnumerator<Block*>* enumerator = blocks->GetEnumerator();
+    while (enumerator->MoveNext()) {
+        delete enumerator->GetCurrent();
     }
+    delete enumerator;
 }
 
 template<class T>
@@ -174,15 +168,23 @@ void SegmentedDeque<T>::RemoveBoundaryBlock(bool fromFront) {
 template<class T>
 const typename SegmentedDeque<T>::Block& SegmentedDeque<T>::FindBlock(int index, int& localIndex) const {
     int offset = index;
-    for (int i = 0; i < blocks->GetLength(); i++) {
-        Block* block = blocks->Get(i);
+    const Block* found = nullptr;
+
+    IEnumerator<Block*>* enumerator = blocks->GetEnumerator();
+    while (enumerator->MoveNext()) {
+        Block* block = enumerator->GetCurrent();
         if (offset < block->Size()) {
             localIndex = offset;
-            return *block;
+            found = block;
+            break;
         }
         offset -= block->Size();
     }
+    delete enumerator;
 
+    if (found != nullptr) {
+        return *found;
+    }
     throw IndexOutOfRange(index, totalSize);
 }
 
@@ -199,38 +201,116 @@ const T& SegmentedDeque<T>::GetRef(int index) const {
 template<class T>
 template<class Visitor>
 void SegmentedDeque<T>::ForEachElement(Visitor visitor) const {
-    for (int i = 0; i < blocks->GetLength(); i++) {
-        Block* block = blocks->Get(i);
+    IEnumerator<Block*>* enumerator = blocks->GetEnumerator();
+    while (enumerator->MoveNext()) {
+        Block* block = enumerator->GetCurrent();
         for (int j = 0; j < block->Size(); j++) {
             visitor(block->Get(j));
         }
     }
+    delete enumerator;
 }
 
 template<class T>
 template<class Visitor>
 void SegmentedDeque<T>::ForEachBlock(Visitor visitor) const {
-    for (int i = 0; i < blocks->GetLength(); i++) {
-        visitor(*blocks->Get(i), i);
+    IEnumerator<Block*>* enumerator = blocks->GetEnumerator();
+    int index = 0;
+    while (enumerator->MoveNext()) {
+        visitor(*enumerator->GetCurrent(), index++);
     }
+    delete enumerator;
 }
 
 template<class T>
-SegmentedDeque<T>* SegmentedDeque<T>::BuildFromSequence(const Sequence<T>& source) const {
+DynamicArray<T> SegmentedDeque<T>::CopyElementsToArray() const {
+    DynamicArray<T> values;
+    values.Reserve(totalSize);
+    ForEachElement([&](const T& item) {
+        values.Append(item);
+    });
+    return values;
+}
+
+template<class T>
+SegmentedDeque<T>* SegmentedDeque<T>::BuildFromArray(const DynamicArray<T>& values) const {
     SegmentedDeque<T>* result = CreateEmptySameKind();
-    AppendSequenceTo(*result, source);
+    for (int i = 0; i < values.GetSize(); i++) {
+        result->PushBackDirect(values[i]);
+    }
     return result;
 }
 
 template<class T>
-template<class Transformer>
-SegmentedDeque<T>* SegmentedDeque<T>::BuildFromTransformedSequence(Transformer transform) const {
-    Sequence<T>* source = ToSequence();
-    Sequence<T>* transformed = transform(*source);
-    SegmentedDeque<T>* result = BuildFromSequence(*transformed);
-    delete transformed;
-    delete source;
-    return result;
+DynamicArray<int> SegmentedDeque<T>::BuildPrefixTable(const DynamicArray<T>& pattern) {
+    DynamicArray<int> prefix(pattern.GetSize());
+    int matched = 0;
+
+    for (int i = 1; i < pattern.GetSize(); i++) {
+        while (matched > 0 && !(pattern[i] == pattern[matched])) {
+            matched = prefix[matched - 1];
+        }
+        if (pattern[i] == pattern[matched]) {
+            matched++;
+        }
+        prefix[i] = matched;
+    }
+
+    return prefix;
+}
+
+template<class T>
+template<class Comparator>
+void SegmentedDeque<T>::MergeSortValues(
+    DynamicArray<T>& values,
+    DynamicArray<T>& buffer,
+    int left,
+    int right,
+    const Comparator& comparator
+) {
+    if (left >= right) {
+        return;
+    }
+
+    const int mid = left + (right - left) / 2;
+    MergeSortValues(values, buffer, left, mid, comparator);
+    MergeSortValues(values, buffer, mid + 1, right, comparator);
+    MergeSortedRanges(values, buffer, left, mid, right, comparator);
+}
+
+template<class T>
+template<class Comparator>
+void SegmentedDeque<T>::MergeSortedRanges(
+    DynamicArray<T>& values,
+    DynamicArray<T>& buffer,
+    int left,
+    int mid,
+    int right,
+    const Comparator& comparator
+) {
+    int leftIndex = left;
+    int rightIndex = mid + 1;
+    int target = left;
+
+    while (leftIndex <= mid && rightIndex <= right) {
+        if (comparator(values[rightIndex], values[leftIndex])) {
+            buffer[target++] = values[rightIndex++];
+        } else {
+            buffer[target++] = values[leftIndex++];
+        }
+    }
+
+    while (leftIndex <= mid) {
+        buffer[target++] = values[leftIndex++];
+    }
+
+    while (rightIndex <= right) {
+        buffer[target++] = values[rightIndex++];
+    }
+
+    for (int i = left; i <= right; i++) {
+        values[i] = buffer[i];
+    }
 }
 
 template<class T>
@@ -406,9 +486,16 @@ SegmentedDeque<T>* SegmentedDeque<T>::GetSubDeque(int start, int end) const {
     if (start < 0 || end >= GetLength() || start > end) {
         throw IndexOutOfRange(start, GetLength());
     }
-    return BuildFromTransformedSequence([&](const Sequence<T>& source) {
-        return source.GetSubsequence(start, end);
+
+    SegmentedDeque<T>* result = CreateEmptySameKind();
+    int index = 0;
+    ForEachElement([&](const T& item) {
+        if (index >= start && index <= end) {
+            result->PushBackDirect(item);
+        }
+        index++;
     });
+    return result;
 }
 
 template<class T>
@@ -420,16 +507,21 @@ int SegmentedDeque<T>::FindSubDeque(const SegmentedDeque<T>& pattern) const {
         return -1;
     }
 
-    for (int start = 0; start <= GetLength() - pattern.GetLength(); start++) {
-        bool matched = true;
-        for (int offset = 0; offset < pattern.GetLength(); offset++) {
-            if (!(GetRef(start + offset) == pattern.Get(offset))) {
-                matched = false;
-                break;
-            }
+    DynamicArray<T> textValues = CopyElementsToArray();
+    DynamicArray<T> patternValues = pattern.CopyElementsToArray();
+    DynamicArray<int> prefix = BuildPrefixTable(patternValues);
+
+    int matched = 0;
+    for (int i = 0; i < textValues.GetSize(); i++) {
+        while (matched > 0 && !(textValues[i] == patternValues[matched])) {
+            matched = prefix[matched - 1];
         }
-        if (matched) {
-            return start;
+
+        if (textValues[i] == patternValues[matched]) {
+            matched++;
+            if (matched == patternValues.GetSize()) {
+                return i - matched + 1;
+            }
         }
     }
 
@@ -443,16 +535,22 @@ bool SegmentedDeque<T>::ContainsSubDeque(const SegmentedDeque<T>& pattern) const
 
 template<class T>
 SegmentedDeque<T>* SegmentedDeque<T>::Map(const std::function<T(const T&)>& mapper) const {
-    return BuildFromTransformedSequence([&](const Sequence<T>& source) {
-        return source.Map(mapper);
+    SegmentedDeque<T>* result = CreateEmptySameKind();
+    ForEachElement([&](const T& item) {
+        result->PushBackDirect(mapper(item));
     });
+    return result;
 }
 
 template<class T>
 SegmentedDeque<T>* SegmentedDeque<T>::Where(const std::function<bool(const T&)>& predicate) const {
-    return BuildFromTransformedSequence([&](const Sequence<T>& source) {
-        return source.Where(predicate);
+    SegmentedDeque<T>* result = CreateEmptySameKind();
+    ForEachElement([&](const T& item) {
+        if (predicate(item)) {
+            result->PushBackDirect(item);
+        }
     });
+    return result;
 }
 
 template<class T>
@@ -460,9 +558,10 @@ T SegmentedDeque<T>::Reduce(
     const std::function<T(const T&, const T&)>& reducer,
     const T& initial
 ) const {
-    Sequence<T>* source = ToSequence();
-    T result = source->Reduce(reducer, initial);
-    delete source;
+    T result = initial;
+    ForEachElement([&](const T& item) {
+        result = reducer(item, result);
+    });
     return result;
 }
 
@@ -470,27 +569,14 @@ template<class T>
 SegmentedDeque<T>* SegmentedDeque<T>::Sorted(
     const std::function<bool(const T&, const T&)>& comparator
 ) const {
-    DynamicArray<T> values;
-    values.Reserve(GetLength());
-    ForEachElement([&](const T& item) {
-        values.Append(item);
-    });
-
-    for (int i = 1; i < values.GetSize(); i++) {
-        T current = values[i];
-        int j = i - 1;
-        while (j >= 0 && comparator(current, values[j])) {
-            values[j + 1] = values[j];
-            j--;
-        }
-        values[j + 1] = current;
+    DynamicArray<T> values = CopyElementsToArray();
+    if (values.GetSize() <= 1) {
+        return BuildFromArray(values);
     }
 
-    SegmentedDeque<T>* result = CreateEmptySameKind();
-    for (int i = 0; i < values.GetSize(); i++) {
-        result->PushBackDirect(values[i]);
-    }
-    return result;
+    DynamicArray<T> buffer(values.GetSize());
+    MergeSortValues(values, buffer, 0, values.GetSize() - 1, comparator);
+    return BuildFromArray(values);
 }
 
 template<class T>
@@ -498,27 +584,30 @@ SegmentedDeque<T>* SegmentedDeque<T>::MergeSorted(
     const SegmentedDeque<T>& other,
     const std::function<bool(const T&, const T&)>& comparator
 ) const {
-    SegmentedDeque<T>* result = CreateEmptySameKind();
+    DynamicArray<T> leftValues = CopyElementsToArray();
+    DynamicArray<T> rightValues = other.CopyElementsToArray();
+    DynamicArray<T> merged;
+    merged.Reserve(leftValues.GetSize() + rightValues.GetSize());
 
     int left = 0;
     int right = 0;
-    while (left < GetLength() && right < other.GetLength()) {
-        if (comparator(other.Get(right), GetRef(left))) {
-            result->PushBackDirect(other.Get(right++));
+    while (left < leftValues.GetSize() && right < rightValues.GetSize()) {
+        if (comparator(rightValues[right], leftValues[left])) {
+            merged.Append(rightValues[right++]);
         } else {
-            result->PushBackDirect(GetRef(left++));
+            merged.Append(leftValues[left++]);
         }
     }
 
-    while (left < GetLength()) {
-        result->PushBackDirect(GetRef(left++));
+    while (left < leftValues.GetSize()) {
+        merged.Append(leftValues[left++]);
     }
 
-    while (right < other.GetLength()) {
-        result->PushBackDirect(other.Get(right++));
+    while (right < rightValues.GetSize()) {
+        merged.Append(rightValues[right++]);
     }
 
-    return result;
+    return BuildFromArray(merged);
 }
 
 template<class T>

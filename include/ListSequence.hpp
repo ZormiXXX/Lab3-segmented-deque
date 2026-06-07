@@ -116,11 +116,7 @@ public:
                 break;
             }
             if (index >= start) {
-                Sequence<T>* updated = result->Append(enumerator->GetCurrent());
-                if (updated != result) {
-                    delete result;
-                }
-                result = updated;
+                this->AppendToAccumulator(result, enumerator->GetCurrent());
             }
             index++;
         }

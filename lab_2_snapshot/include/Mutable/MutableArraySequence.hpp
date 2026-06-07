@@ -13,6 +13,12 @@ protected:
         return this;
     }
 
+    Sequence<T>* CreateAccumulator(int expectedLength) const override {
+        auto* result = new MutableArraySequence<T>();
+        result->items->Reserve(expectedLength);
+        return result;
+    }
+
 public:
     MutableArraySequence() : ArraySequence<T>() {}
 

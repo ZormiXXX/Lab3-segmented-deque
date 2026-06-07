@@ -1,31 +1,36 @@
 CXX = g++
 CXXFLAGS = -std=c++17 -Wall -Wextra -I./include
+LDLIBS = -lncurses
 
 SRC_DIR = src
 BUILD_DIR = build
+INC_DIR = include
 
 MAIN_TARGET = $(BUILD_DIR)/lab3
 TEST_TARGET = $(BUILD_DIR)/lab3_tests
 
 MAIN_OBJECTS = $(BUILD_DIR)/main.o $(BUILD_DIR)/tests.o
 TEST_OBJECTS = $(BUILD_DIR)/tests.o $(BUILD_DIR)/tests_main.o
+OBJECTS = $(sort $(MAIN_OBJECTS) $(TEST_OBJECTS))
+DEPFILES = $(OBJECTS:.o=.d)
 
 all: $(BUILD_DIR) $(MAIN_TARGET) $(TEST_TARGET)
 
 $(BUILD_DIR):
+	@echo "Создание директории $(BUILD_DIR)..."
 	@mkdir -p $(BUILD_DIR)
 
 $(MAIN_TARGET): $(MAIN_OBJECTS)
 	@echo "Линковка $(MAIN_TARGET)..."
-	$(CXX) $(CXXFLAGS) -o $@ $^
+	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDLIBS)
 
 $(TEST_TARGET): $(TEST_OBJECTS)
 	@echo "Линковка $(TEST_TARGET)..."
-	$(CXX) $(CXXFLAGS) -o $@ $^
+	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDLIBS)
 
 $(BUILD_DIR)/%.o: $(SRC_DIR)/%.cpp | $(BUILD_DIR)
 	@echo "Компиляция $<..."
-	$(CXX) $(CXXFLAGS) -c $< -o $@
+	$(CXX) $(CXXFLAGS) -MMD -MP -c $< -o $@
 
 run: $(MAIN_TARGET)
 	@echo "Запуск программы..."
@@ -34,6 +39,10 @@ run: $(MAIN_TARGET)
 test: $(TEST_TARGET)
 	@echo "Запуск тестов..."
 	./$(TEST_TARGET)
+
+leaks: $(TEST_TARGET)
+	@echo "Проверка утечек памяти через leaks..."
+	MallocStackLogging=1 leaks --atExit -- ./$(TEST_TARGET)
 
 clean:
 	@echo "Очистка..."
@@ -44,9 +53,12 @@ rebuild: clean all
 help:
 	@echo "Доступные команды:"
 	@echo "  make        - Собрать основную программу и тесты"
-	@echo "  make run    - Запустить интерактивный CLI"
+	@echo "  make run    - Запустить полноэкранный интерфейс"
 	@echo "  make test   - Запустить модульные тесты"
+	@echo "  make leaks  - Проверить тесты через macOS leaks"
 	@echo "  make clean  - Удалить build/"
 	@echo "  make rebuild- Пересобрать всё заново"
 
-.PHONY: all run test clean rebuild help
+-include $(DEPFILES)
+
+.PHONY: all run test leaks clean rebuild help

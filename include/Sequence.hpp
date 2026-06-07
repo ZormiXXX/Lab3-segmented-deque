@@ -68,6 +68,33 @@ protected:
         return accumulator;
     }
 
+    static void AdoptAccumulator(Sequence<T>*& accumulator, Sequence<T>* updated) {
+        if (updated != accumulator) {
+            delete accumulator;
+        }
+        accumulator = updated;
+    }
+
+    void AppendToAccumulator(Sequence<T>*& accumulator, const T& item) const {
+        AdoptAccumulator(accumulator, accumulator->Append(item));
+    }
+
+    void ConcatIntoAccumulator(Sequence<T>*& accumulator, const Sequence<T>* other) const {
+        AdoptAccumulator(accumulator, accumulator->Concat(other));
+    }
+
+    void CopySequenceIntoAccumulator(Sequence<T>*& accumulator, const Sequence<T>* other) const {
+        if (other == nullptr) {
+            return;
+        }
+
+        IEnumerator<T>* enumerator = other->GetEnumerator();
+        while (enumerator->MoveNext()) {
+            AppendToAccumulator(accumulator, enumerator->GetCurrent());
+        }
+        delete enumerator;
+    }
+
 public:
     virtual ~Sequence() = default;
 
@@ -91,11 +118,7 @@ public:
         Sequence<T>* result = CreateAccumulator(GetLength());
         IEnumerator<T>* enumerator = GetEnumerator();
         while (enumerator->MoveNext()) {
-            Sequence<T>* updated = result->Append(f(enumerator->GetCurrent()));
-            if (updated != result) {
-                delete result;
-            }
-            result = updated;
+            AppendToAccumulator(result, f(enumerator->GetCurrent()));
         }
         delete enumerator;
         return FinalizeAccumulator(result);
@@ -107,11 +130,7 @@ public:
         IEnumerator<T>* enumerator = GetEnumerator();
         while (enumerator->MoveNext()) {
             Sequence<T>* expanded = f(enumerator->GetCurrent());
-            Sequence<T>* updated = result->Concat(expanded);
-            if (updated != result) {
-                delete result;
-            }
-            result = updated;
+            ConcatIntoAccumulator(result, expanded);
             delete expanded;
         }
         delete enumerator;
@@ -136,11 +155,7 @@ public:
         while (enumerator->MoveNext()) {
             const T& item = enumerator->GetCurrent();
             if (pred(item)) {
-                Sequence<T>* updated = result->Append(item);
-                if (updated != result) {
-                    delete result;
-                }
-                result = updated;
+                AppendToAccumulator(result, item);
             }
         }
         delete enumerator;
@@ -219,11 +234,7 @@ public:
                     current = CreateAccumulator(length);
                 }
             } else {
-                Sequence<T>* updated = current->Append(item);
-                if (updated != current) {
-                    delete current;
-                }
-                current = updated;
+                AppendToAccumulator(current, item);
             }
         }
         delete enumerator;
@@ -269,40 +280,20 @@ public:
 
         while (source->MoveNext()) {
             if (!replacementInserted && currentIndex == actualIndex && replacement != nullptr) {
-                IEnumerator<T>* replacementEnumerator = replacement->GetEnumerator();
-                while (replacementEnumerator->MoveNext()) {
-                    Sequence<T>* updated = result->Append(replacementEnumerator->GetCurrent());
-                    if (updated != result) {
-                        delete result;
-                    }
-                    result = updated;
-                }
-                delete replacementEnumerator;
+                CopySequenceIntoAccumulator(result, replacement);
                 replacementInserted = true;
             }
 
             const T& item = source->GetCurrent();
             if (currentIndex < actualIndex || currentIndex >= skipUntil) {
-                Sequence<T>* updated = result->Append(item);
-                if (updated != result) {
-                    delete result;
-                }
-                result = updated;
+                AppendToAccumulator(result, item);
             }
             currentIndex++;
         }
         delete source;
 
         if (!replacementInserted && replacement != nullptr) {
-            IEnumerator<T>* replacementEnumerator = replacement->GetEnumerator();
-            while (replacementEnumerator->MoveNext()) {
-                Sequence<T>* updated = result->Append(replacementEnumerator->GetCurrent());
-                if (updated != result) {
-                    delete result;
-                }
-                result = updated;
-            }
-            delete replacementEnumerator;
+            CopySequenceIntoAccumulator(result, replacement);
         }
 
         return FinalizeAccumulator(result);

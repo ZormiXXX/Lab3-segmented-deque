@@ -6,12 +6,17 @@
 template<class T, class U, class Func>
 Sequence<U>* MapIndexed(const Sequence<T>& sequence, Func mapper) {
     Sequence<U>* result = new MutableArraySequence<U>();
-    for (int i = 0; i < sequence.GetLength(); i++) {
-        Sequence<U>* updated = result->Append(mapper(sequence.Get(i), i));
+    IEnumerator<T>* enumerator = sequence.GetEnumerator();
+    int index = 0;
+
+    while (enumerator->MoveNext()) {
+        Sequence<U>* updated = result->Append(mapper(enumerator->GetCurrent(), index++));
         if (updated != result) {
             delete result;
             result = updated;
         }
     }
+
+    delete enumerator;
     return result;
 }

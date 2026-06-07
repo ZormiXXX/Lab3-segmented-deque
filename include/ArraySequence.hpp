@@ -135,11 +135,7 @@ public:
 
         Sequence<T>* result = this->CreateAccumulator(end - start + 1);
         for (int i = start; i <= end; i++) {
-            Sequence<T>* updated = result->Append(items->Get(i));
-            if (updated != result) {
-                delete result;
-            }
-            result = updated;
+            this->AppendToAccumulator(result, items->Get(i));
         }
         return this->FinalizeAccumulator(result);
     }
